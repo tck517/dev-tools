@@ -15,9 +15,8 @@ Plug 'tpope/vim-fugitive'
 Plug 'airblade/vim-gitgutter'
 Plug 'esmuellert/codediff.nvim'
 
-" AI Assistant
+" Lua utilities
 Plug 'nvim-lua/plenary.nvim'
-Plug 'avifenesh/claucode.nvim'
 
 " File Explorer
 Plug 'nvim-tree/nvim-web-devicons'
@@ -127,6 +126,17 @@ endif
 " NvimTree setup
 lua << EOF
 require'nvim-tree'.setup {
+  on_attach = function(bufnr)
+    local api = require('nvim-tree.api')
+    api.config.mappings.default_on_attach(bufnr)
+    -- <leader>m on a file: open it, then show it in mdfried (same as <leader>m in the buffer).
+    vim.keymap.set("n", "<leader>m", function()
+      local node = api.tree.get_node_under_cursor()
+      if not node or node.type ~= "file" then return end
+      api.node.open.edit()
+      MdfriedPreview()
+    end, { buffer = bufnr, desc = "Open file and preview with mdfried", silent = true, nowait = true })
+  end,
   actions = {
     open_file = {
       quit_on_open = true,
@@ -136,16 +146,6 @@ require'nvim-tree'.setup {
     dotfiles = true,
   }
 }
-EOF
-
-" ClauCode setup
-lua << EOF
-local ok, claucode = pcall(require, 'claucode')
-if ok then
-  claucode.setup({
-    command = vim.fn.expand("~/.local/bin/claude"),
-  })
-end
 EOF
 
 " CodeDiff setup (VS Code-style diff viewer: :CodeDiff, :CodeDiff --staged, :CodeDiff pr <n>)
@@ -168,7 +168,7 @@ EOF
 " Uses a tmux side pane when inside tmux (passthrough is on, so Kitty graphics
 " work); otherwise a Neovim :terminal vsplit.
 lua << EOF
-local function mdfried_preview()
+function MdfriedPreview()
   local file = vim.api.nvim_buf_get_name(0)
   if file == "" then
     vim.notify("Buffer has no file name; save it first", vim.log.levels.WARN)
@@ -191,7 +191,7 @@ local function mdfried_preview()
     vim.cmd("startinsert")
   end
 end
-vim.keymap.set("n", "<leader>m", mdfried_preview, { desc = "Preview markdown with mdfried", silent = true })
+vim.keymap.set("n", "<leader>m", MdfriedPreview, { desc = "Preview markdown with mdfried", silent = true })
 EOF
 
 " Fugitive: side-by-side diff of a commit (or a file within it) vs its parent.
@@ -299,8 +299,197 @@ nnoremap <leader>n :set number!<CR>
 " Writing mode (Goyo + SoftPencil)
 nnoremap <leader>z :Goyo<CR>:SoftPencil<CR>
 
-" Claude Code mappings
-xnoremap <leader>e :Claude Explain this code<CR>
+" Claude Code mappings — plugin-free (claucode.nvim removed 2026-10-14).
+" Visual <leader>e explains the selection; visual <leader>a picks a question
+" (or lets you type one). Replies open as markdown in a scratch split to the
+" right. Questions that need the rest of the repository let `claude -p` read
+" and grep the project (read-only tools), never edit it.
+"
+"   :'<,'>ClaudeAsk            same as <leader>a
+"   :'<,'>ClaudeAsk tests      run one preset directly (tab-completes)
+"
+" Add or edit presets in the `presets` table below.
+lua << EOF
+local presets = {
+  { key = "explain", label = "Explain this code",
+    repo = false,
+    prompt = "Explain this code to a developer who knows the language but not this codebase. "
+      .. "Say what it does, how, and anything surprising or risky. Be concise." },
+  { key = "tests", label = "How well tested is this?",
+    repo = true,
+    prompt = "How well tested is this code? Find the tests that exercise it, directly or indirectly, "
+      .. "and name them with file paths and line numbers. Then list the behaviours and edge cases "
+      .. "that no test covers. Finish with a one-line verdict." },
+  { key = "callers", label = "What are the incoming dependencies?",
+    repo = true,
+    prompt = "What are the incoming dependencies of this code? List every caller, importer, or "
+      .. "reference in the repository with file path and line number, grouped by module. Note any "
+      .. "callers outside the package it lives in. Say if there are none." },
+  { key = "dead", label = "Is this dead code?",
+    repo = true,
+    prompt = "Is any of this code dead? For each function, class, branch, or parameter, say whether "
+      .. "it is reachable from a live caller, a test, or an entry point, with file paths as evidence. "
+      .. "Distinguish unused from untested. Finish with a verdict per item." },
+  { key = "calls", label = "What does it call?",
+    repo = true,
+    prompt = "What does this code call? List every function, method, module, external service, "
+      .. "file, or environment variable it depends on, grouped as: same file, same package, "
+      .. "elsewhere in the repository, third-party libraries, and the outside world (network, "
+      .. "filesystem, subprocesses). Resolve each in-repo callee to its file path and line. "
+      .. "Flag anything called indirectly, through a callback, injection, or dynamic dispatch." },
+  { key = "coupling", label = "How tightly coupled is it to the rest of the system?",
+    repo = true,
+    prompt = "How tightly coupled is this code to the rest of the system? Assess both directions: "
+      .. "what it depends on (imports, shared state, data shapes, config, globals) and what depends "
+      .. "on it (callers, consumers of its output, tests that pin its behaviour). Point out hidden "
+      .. "coupling: shared mutable state, implicit ordering, duplicated knowledge such as a format "
+      .. "or constant repeated elsewhere, and assumptions callers make that are not enforced here. "
+      .. "Finish with a rating of low, medium, or high coupling, one sentence of justification, "
+      .. "and the single change that would most reduce it." },
+  { key = "failure", label = "What happens if it fails?",
+    repo = true,
+    prompt = "What happens if this code fails? Enumerate the ways it can fail: exceptions it raises "
+      .. "or lets propagate, bad return values, partial writes, timeouts, resource leaks. For each, "
+      .. "trace what the callers in the repository do: catch, retry, log, dead-letter, crash, or "
+      .. "silently continue, with file paths. State the blast radius: what data or user-visible "
+      .. "behaviour is affected and whether the failure is recoverable or leaves inconsistent "
+      .. "state. Name the failure modes that are currently unhandled." },
+  { key = "review", label = "Review for bugs and risks",
+    repo = true,
+    prompt = "Review this code for correctness bugs, unhandled edge cases, and risky assumptions. "
+      .. "Check how callers in the repository use it before judging. Report findings most severe "
+      .. "first, each with a concrete failing input. Say so if you find nothing." },
+}
+
+local repo_preamble = "You are inside the repository this code comes from. Investigate with "
+  .. "Read, Grep, and Glob before answering, and cite file paths. The selected code follows.\n\n"
+
+local function preset_by_key(key)
+  for _, p in ipairs(presets) do if p.key == key then return p end end
+end
+
+-- Open a markdown scratch split to the right and fill it with Claude's answer.
+-- `spec` is { key, label, prompt, repo }; `input` goes to claude on stdin;
+-- `status` is the placeholder shown while it runs; `split` overrides how the
+-- pane opens (default: to the right of the current window).
+local function claude_run(spec, input, status, split)
+  local claude = vim.fn.exepath("claude")
+  if claude == "" then claude = vim.fn.expand("~/.local/bin/claude") end
+  if vim.fn.executable(claude) == 0 then
+    vim.notify("claude CLI not found on PATH or in ~/.local/bin", vim.log.levels.ERROR)
+    return
+  end
+
+  vim.cmd((split or "rightbelow vsplit") .. " | enew")
+  local buf = vim.api.nvim_get_current_buf()
+  vim.bo[buf].buftype = "nofile"
+  vim.bo[buf].bufhidden = "wipe"
+  vim.bo[buf].swapfile = false
+  vim.bo[buf].filetype = "markdown"
+  vim.api.nvim_buf_set_name(buf, "claude://" .. (spec.key or "ask") .. "/" .. buf)
+  vim.wo.wrap = true
+  vim.wo.linebreak = true
+  vim.keymap.set("n", "q", "<Cmd>close<CR>", { buffer = buf, silent = true, desc = "Close Claude pane" })
+  local title = "# Claude: " .. spec.label
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, { title, "", status })
+
+  local cmd = { claude, "-p", (spec.repo and repo_preamble or "") .. spec.prompt, "--output-format", "text" }
+  if spec.repo then
+    vim.list_extend(cmd, { "--allowedTools", "Read,Grep,Glob" })
+  end
+  vim.system(cmd, { stdin = input, text = true, cwd = vim.fn.getcwd() }, function(res)
+    vim.schedule(function()
+      if not vim.api.nvim_buf_is_valid(buf) then return end
+      local out = res.code == 0 and (res.stdout or "")
+        or string.format("claude exited with code %d\n\n%s", res.code, res.stderr or "")
+      local body = vim.split(vim.trim(out), "\n", { plain = true })
+      vim.api.nvim_buf_set_lines(buf, 0, -1, false, vim.list_extend({ title, "" }, body))
+    end)
+  end)
+end
+
+-- Run one question against the current visual selection. `spec` is a preset
+-- entry or { label = ..., prompt = ..., repo = true|false } for a typed question.
+local function claude_ask(spec)
+  local lines = vim.fn.getregion(vim.fn.getpos("v"), vim.fn.getpos("."), { type = vim.fn.mode() })
+  vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<Esc>", true, false, true), "n", false)
+  if #lines == 0 then return end
+
+  local name = vim.fn.expand("%")
+  local ft = vim.bo.filetype
+  local input = string.format("File: %s\nLanguage: %s\n\n%s\n",
+    name ~= "" and name or "[No Name]", ft ~= "" and ft or "unknown", table.concat(lines, "\n"))
+  claude_run(spec, input, string.format("Asking Claude about %d line%s%s...", #lines,
+    #lines == 1 and "" or "s", spec.repo and " (reading the repository)" or ""))
+end
+
+-- Explain the file or directory under the cursor in nvim-tree. Claude gets the
+-- path and reads it itself, so any kind of file works (code, config, markdown,
+-- images, PDFs) and directories are surveyed rather than pasted.
+local function claude_explain_tree_node()
+  local ok, api = pcall(require, "nvim-tree.api")
+  local node = ok and api.tree.get_node_under_cursor() or nil
+  if not node or not node.absolute_path then return end
+  local path = vim.fn.fnamemodify(node.absolute_path, ":.")
+  local is_dir = node.type == "directory"
+
+  -- Open the answer beside the main window, not inside the narrow tree.
+  for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+    local ft = vim.bo[vim.api.nvim_win_get_buf(win)].filetype
+    if ft ~= "NvimTree" and vim.api.nvim_win_get_config(win).relative == "" then
+      vim.api.nvim_set_current_win(win)
+      break
+    end
+  end
+  -- Only the tree is open: put the pane at the far right instead.
+  local split = vim.bo.filetype == "NvimTree" and "botright vsplit" or nil
+
+  local prompt = is_dir
+    and ("Explain the directory named on stdin to a developer new to this codebase. Survey it with "
+      .. "Glob, and Read its key files. Say what it contains, what role it plays in the repository, "
+      .. "its main entry points, and how it connects to the rest. Be concise.")
+    or ("Explain the file named on stdin to a developer who knows the language but not this codebase. "
+      .. "Read it first; it may be code, configuration, documentation, data, or an image. Say what it "
+      .. "is for, how it works, how it fits into the repository, and anything surprising or risky. "
+      .. "Be concise.")
+  claude_run({ key = "explain", label = "Explain " .. path, prompt = prompt, repo = true },
+    string.format("%s: %s\n", is_dir and "Directory" or "File", path),
+    string.format("Asking Claude about %s (reading the repository)...", path), split)
+end
+
+vim.api.nvim_create_autocmd("FileType", {
+  pattern = "NvimTree",
+  callback = function(ev)
+    vim.keymap.set("n", "<leader>e", claude_explain_tree_node,
+      { buffer = ev.buf, silent = true, desc = "Explain file or directory with Claude" })
+  end,
+})
+
+-- Picker: presets plus a free-form question. Typed questions get repository
+-- access, since that is what most ad hoc questions need.
+local function claude_pick()
+  local items = vim.list_extend(vim.deepcopy(presets), { { key = "custom", label = "Type a question..." } })
+  vim.ui.select(items, { prompt = "Ask Claude about the selection", format_item = function(i) return i.label end },
+    function(choice)
+      if not choice then return end
+      if choice.key ~= "custom" then return claude_ask(choice) end
+      vim.ui.input({ prompt = "Question: " }, function(q)
+        if q and q ~= "" then claude_ask({ key = "ask", label = q, prompt = q, repo = true }) end
+      end)
+    end)
+end
+
+vim.keymap.set("x", "<leader>e", function() claude_ask(preset_by_key("explain")) end,
+  { desc = "Explain selection with Claude", silent = true })
+vim.keymap.set("x", "<leader>a", claude_pick, { desc = "Ask Claude about selection", silent = true })
+vim.api.nvim_create_user_command("ClaudeAsk", function(opts)
+  if opts.args == "" then return claude_pick() end
+  local p = preset_by_key(opts.args)
+  if not p then return vim.notify("ClaudeAsk: no preset named " .. opts.args, vim.log.levels.ERROR) end
+  claude_ask(p)
+end, { range = true, nargs = "?", complete = function() return vim.tbl_map(function(p) return p.key end, presets) end })
+_G.ClaudeAsk = claude_ask  -- for scripting and headless tests
+EOF
 
 " Remove whitespace-only lines
 nnoremap <leader>ws :%s/^\s\+$//<CR>
