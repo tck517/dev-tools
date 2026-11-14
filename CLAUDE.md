@@ -16,6 +16,12 @@ Two kinds of thing live here. Keep them apart:
 
 ## Commands
 - **Install / re-point links**: `./install.sh` (`--dry-run` to preview)
+- **Check everything loads**: `tools/validate.sh [all|dotfiles|scripts]`
+  (fish syntax, tmux and Neovim load in isolation, install.sh against a temp
+  HOME, `bash -n` + `shellcheck` on scripts). Never push with it failing, and
+  never `git push --no-verify`.
+- **Enable the pre-push check** (once per clone):
+  `git config core.hooksPath tools/hooks`
 - **Update**: `git add . && git commit -m "update dotfiles"`
 
 ## dotfiles/

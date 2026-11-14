@@ -568,7 +568,8 @@ if [ "$split" = 1 ]; then
   exec tmux split-window -h -l "${BDBOARD_WIDTH:-45%}" -c "$PWD" "$SELF ${args[*]}"
 fi
 
-export BDBOARD_STATE="$(mktemp -d)"
+BDBOARD_STATE="$(mktemp -d)"
+export BDBOARD_STATE
 refresher=""
 trap '[ -n "$refresher" ] && kill "$refresher" 2>/dev/null; rm -rf "$BDBOARD_STATE"' EXIT
 
