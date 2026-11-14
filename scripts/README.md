@@ -62,6 +62,9 @@ rgn "function"
 
 ## Search everything (empty pattern)
 rgn
+
+## Show usage
+rgn --help
 ```
 
 #### Interactive Controls

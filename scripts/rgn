@@ -1,5 +1,21 @@
 #!/bin/bash
 
+usage() {
+  cat <<'EOF'
+Usage: rgn [PATTERN]
+       rgn -h | --help
+
+Search with ripgrep, pick a match in fzf, open it in Neovim at that line.
+PATTERN is passed to rg (smart-case); with none, every line is listed.
+
+Requires: rg, fzf, nvim, bat
+EOF
+}
+
+case "${1:-}" in
+  -h|--help) usage; exit 0 ;;
+esac
+
 # Check if rg, fzf, and nvim are installed
 command -v rg >/dev/null 2>&1 || { echo "rg (ripgrep) is required but not installed."; exit 1; }
 command -v fzf >/dev/null 2>&1 || { echo "fzf is required but not installed."; exit 1; }
