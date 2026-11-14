@@ -1,4 +1,25 @@
 {
+  "permissions": {
+    "deny": [
+      "Read(~/.config/fish/secrets.fish)",
+      "Read(~/.zsh_secrets)",
+      "Read(*secret*)",
+      "Read(*.key)",
+      "Read(*credentials*)",
+      "Bash(bd edit:*)",
+      "Bash(bd create-form:*)",
+      "Bash(bd delete:*)",
+      "Bash(git push --no-verify:*)"
+    ],
+    "ask": [
+      "Bash(bd init:*)",
+      "Bash(bd dolt push:*)",
+      "Bash(bd dolt pull:*)",
+      "Bash(bd close:*)",
+      "Bash(git push --force:*)",
+      "Bash(git push -f:*)"
+    ]
+  },
   "hooks": {
     "SessionStart": [
       {
