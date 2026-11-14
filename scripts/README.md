@@ -7,7 +7,7 @@ Small command-line tools, mostly shell.
 | [`rgn`](#rgn---ripgrep--fzf--neovim-integration) | Search code with ripgrep, pick a match in fzf, open it in Neovim |
 | [`bdboard`](#bdboard---a-beads-board-for-a-tmux-pane) | Browse a [beads](https://github.com/steveyegge/beads) issue tracker as a live board in a tmux pane, with plain-language explanations from Claude |
 
-To install, clone the repo and put it on your `PATH`, or copy the script you want into a directory that is.
+To install, put this directory (`scripts/` in [tck517/dev-tools](https://github.com/tck517/dev-tools)) on your `PATH`, or copy the script you want into a directory that is.
 
 ## rgn - Ripgrep + FZF + Neovim Integration
 
