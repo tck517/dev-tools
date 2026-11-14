@@ -7,3 +7,13 @@ dotfiles/fish/secrets.fish
 
 # Claude Code worktrees
 .claude/worktrees/
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key
+.beads/proxieddb/
+
+# beads exports: issue data stays in the private Dolt remote, never in this
+# public repo
+.beads/*.jsonl

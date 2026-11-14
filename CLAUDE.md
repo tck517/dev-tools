@@ -56,3 +56,35 @@ Two kinds of thing live here. Keep them apart:
 - Check for required tools up front and say which one is missing
 - `shellcheck` clean
 - Each script gets a section in `scripts/README.md`
+
+## Beads (work tracking)
+
+`bd` is the only issue tracker here; ids look like `df-<hash>`.
+
+### Privacy
+- This repo is public; the beads data is not. It lives in a local Dolt
+  database synced to the private `tck517/dev-tools-beads` (`refs/dolt/data`).
+- Never commit `.beads/*.jsonl` (ignored) and never copy bead content (notes,
+  operator runbooks) into commits, docs or scripts.
+- `bd dolt push` / `bd dolt pull` only when the operator asks.
+
+### Hygiene
+- Never `bd edit`, `bd create-form` or `bd delete`.
+- Always `--json` when a command's output is parsed.
+- Scope changes go in `bd note <id> "..."`, not by rewriting the description.
+- Blocks: `bd dep add <blocked> --blocked-by <blocker>` (never bare `bd link`).
+- Epic membership: `--parent <epic>`; create children with
+  `--no-inherit-labels` so they don't copy the epic's labels.
+- Workers never `bd close`. A bead closes only after its change is on `main`.
+
+### Labels
+- Exactly one `safety:*` per bead:
+  - `safety:internal`: docs, comments, repo tooling
+  - `safety:reversible`: a config or script change that can't stop a shell,
+    tmux, Neovim or kitty from starting (themes, keybindings, new script flags)
+  - `safety:hot`: can break startup of the login shell, tmux, Neovim or kitty,
+    or changes what `install.sh` links
+- One `effort:S|M|L|XL`.
+- `human-ops`: a step only the operator can do (macOS settings, installs,
+  granting permissions). Put the steps in `bd note <id> "Operator: ..."`; the
+  last `Operator:` note wins.
