@@ -22,6 +22,8 @@ Two kinds of thing live here. Keep them apart:
   never `git push --no-verify`.
 - **Enable the pre-push check** (once per clone):
   `git config core.hooksPath tools/hooks`
+- **Live smoke test**: `tools/smoke.sh` (fish and headless Neovim inside a
+  throwaway tmux server; needs the `$HOME` links pointing here)
 - **Update**: `git add . && git commit -m "update dotfiles"`
 
 ## dotfiles/
@@ -94,3 +96,21 @@ Two kinds of thing live here. Keep them apart:
 - `human-ops`: a step only the operator can do (macOS settings, installs,
   granting permissions). Put the steps in `bd note <id> "Operator: ..."`; the
   last `Operator:` note wins.
+
+### Delivery workflow
+- `/explain-bead`, `/deliver`, `/validate-epic` and their agents follow
+  `docs/EPIC-WORKFLOW.md` (lifecycle, workflow labels, branches, merge and
+  closure). Epics land by the operator's `git merge --no-ff`, never a squash.
+- `tools/epic-ready.sh <epic>` lists the deliverable children of an epic;
+  inside an epic use it instead of `bd ready`.
+
+### Scripts that read bd
+- `set -euo pipefail`, bash 3.2-safe; `--json` on every bd call and
+  `--limit 0` on every `bd list`.
+- Replace control characters before `jq`
+  (`perl -pe 's/[\x00-\x09\x0b\x0c\x0e-\x1f]/ /g'`): bead text can hold
+  them and `jq` rejects them.
+- Fail loudly: a bd or parse error exits non-zero with a message and never
+  reports a "ready" or "clean" result.
+- Interactive shells are fish, where unquoted `$ids` don't word-split: run
+  bd loops under `bash -c` or from a script file.

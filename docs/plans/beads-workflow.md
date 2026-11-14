@@ -28,7 +28,7 @@ repo, not from older copies elsewhere; its versions are the newest.
 | 1 | `bd init` (prefix `df`), private Dolt remote, CLAUDE.md beads rules | done |
 | 2 | `tools/validate.sh` + `tools/hooks/pre-push` | done |
 | 3 | `.claude/settings.json` permissions, `.beads/PRIME.md` | done |
-| 4 | Port agents, commands, `epic-ready.sh`, workflow doc | **next** |
+| 4 | Port agents, commands, `epic-ready.sh`, workflow doc | ported; checks below pending |
 | 5 | Pilot epic | |
 | 6 | Retro; decide on a shared `claude/` directory | |
 
@@ -62,10 +62,24 @@ follow-ups: `--no-inherit-labels` plus a `discovered-from:<id>` dependency;
 they go in the backlog, not under the epic.
 
 ### Done when
-- `tools/validate.sh` passes (it shellchecks `tools/epic-ready.sh`).
-- `/explain-bead` runs on a real bead.
-- A dry run of `/deliver` on a trivial bead gets through pre-flight and one
-  round.
+- [x] `tools/validate.sh` passes (it shellchecks `tools/epic-ready.sh`).
+- [ ] `/explain-bead` runs on a real bead.
+- [ ] A dry run of `/deliver` on a trivial bead gets through pre-flight and
+  one round.
+
+The last two need a new session (agents and commands load at session start)
+and a bead to run on; the phase 5 pilot beads can serve.
+
+### What the port added or found (2026-11-14)
+- `tools/smoke.sh`: the `/validate-epic` smoke test as a script, so it is
+  shellchecked and can be run by hand.
+- `tools/validate.sh` now also checks new, not-yet-added files, so a review
+  of an uncommitted diff covers a new script.
+- Trunk mode commits on `main`; `/deliver` then asks whether to push, and
+  closes the bead only after the commit is on `origin/main`.
+- Permissions: `bd delete` is refused as intended. `bd close` ran without a
+  prompt in a session in bypass-permissions mode, so `ask` rules only guard
+  sessions in a prompting mode.
 
 ## Phase 5: pilot epic
 

@@ -34,10 +34,18 @@ check() { # name, command...
 
 skip() { echo "skip  $1 ($2)"; }
 
+# Tracked files plus new ones not yet added (not ignored ones), so /deliver
+# reviews check a new script before it is committed. Deleted ones drop out.
+files() {
+  local f
+  git ls-files --cached --others --exclude-standard -- "$@" |
+    while read -r f; do [ ! -e "$f" ] || echo "$f"; done
+}
+
 # Each check is a function so check() can capture all of its output.
 fish_syntax() {
   local f rc=0
-  for f in $(git ls-files 'dotfiles/fish/*.fish'); do
+  for f in $(files 'dotfiles/fish/*.fish'); do
     fish -n "$f" || rc=1
   done
   return $rc
@@ -93,7 +101,7 @@ fi
 if [ "$area" != dotfiles ]; then
   echo "scripts/ and tools"
   # shellcheck disable=SC2046 # one file per line, no spaces in names
-  set -- $(shell_scripts $(git ls-files scripts tools) install.sh)
+  set -- $(shell_scripts $(files scripts tools) install.sh)
   check "bash syntax" bash_syntax "$@"
   check "shellcheck" shellcheck -S warning "$@"
 fi
