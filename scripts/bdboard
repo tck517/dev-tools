@@ -130,12 +130,12 @@ fold() {
   fi
   # With a filter active the heading row may not be listed, so don't jump.
   if [ -n "$query" ]; then
-    printf 'reload-sync(%s __list)' "$SELF"
+    printf 'reload-sync("$BDBOARD_SELF" __list)'
     return
   fi
   pos=""
   case " $SECTIONS " in *" $key "*) pos="$(heading_pos "$key")" ;; esac
-  printf 'reload-sync(%s __list)+pos(%s)' "$SELF" "${pos:-1}"
+  printf 'reload-sync("$BDBOARD_SELF" __list)+pos(%s)' "${pos:-1}"
 }
 
 list_beads() {
@@ -551,7 +551,7 @@ board_session() {
 
 show_window() { # dir id file [session]
   if [ -n "$TMUX" ]; then
-    tmux new-window -t "${4:-$(board_session)}:" -n "$2" -c "$1" "$SELF __show $(printf '%q' "$3")"
+    tmux new-window -t "${4:-$(board_session)}:" -n "$2" -c "$1" "$(printf '%q __show %q' "$SELF" "$3")"
   else
     show_markdown "$3"
   fi
@@ -617,7 +617,8 @@ done
 
 if [ "$split" = 1 ]; then
   [ -n "$TMUX" ] || die "--split needs to run inside tmux"
-  exec tmux split-window -h -l "${BDBOARD_WIDTH:-45%}" -c "$PWD" "$SELF ${args[*]}"
+  exec tmux split-window -h -l "${BDBOARD_WIDTH:-45%}" -c "$PWD" \
+    "$(printf '%q ' "$SELF" ${args[@]+"${args[@]}"})"
 fi
 
 BDBOARD_STATE="$(mktemp -d)"
@@ -644,7 +645,7 @@ if [ "$interval" -gt 0 ] 2>/dev/null; then
     port="$(cat "$port_file")"
     # A reload re-runs the preview, which snaps the detail pane back to its
     # first line, so skip the refresh while scrolling in detail mode.
-    reload_cmd="transform:[ \"\$FZF_PROMPT\" = 'detail> ' ] || echo 'reload($SELF __list)'"
+    reload_cmd="transform:[ \"\$FZF_PROMPT\" = 'detail> ' ] || echo 'reload(\"\$BDBOARD_SELF\" __list)'"
     while sleep "$interval"; do
       curl -s -XPOST "localhost:$port" -d "$reload_cmd" >/dev/null 2>&1 || exit 0
     done
@@ -672,24 +673,29 @@ detail_key() { # key, action in detail mode, action in the list
   printf -- '--bind=%s:transform:%s && echo %q || echo %q' "$1" "$in_detail" "$2" "$3"
 }
 
+# fzf actions reach the shell as text; the path goes in by environment variable
+# so a space, quote or parenthesis in it can't break them.
+BDBOARD_SELF="$SELF"
+export BDBOARD_SELF
+
 "$SELF" __list | fzf --ansi --layout=reverse --no-sort --track --listen \
   --with-shell='bash -c' \
   --delimiter='\t' --with-nth=2 \
   --header="$(header_text)" --prompt='filter> ' --info=inline-right \
   --input-border=rounded \
   --list-border=rounded --list-label=' beads ' \
-  --preview="$SELF __preview {1}" --preview-window='down,55%,border-rounded' \
+  --preview="\"\$BDBOARD_SELF\" __preview {1}" --preview-window='down,55%,border-rounded' \
   --highlight-line --pointer='▶' --gutter=' ' \
   --color='border:238,label:245,bg+:236,gutter:-1,pointer:141:bold' \
   --color='preview-border:141,preview-label:141:bold' \
   --bind="focus:transform-preview-label:$label_cmd" \
-  --bind="start:execute-silent(echo \$FZF_PORT > $BDBOARD_STATE/port)" \
-  --bind="enter:$run($SELF __explain {1})" \
-  --bind="ctrl-e:$run($SELF __explain {1} force)" \
-  --bind="ctrl-r:reload($SELF __list)" \
-  --bind="ctrl-f:transform:$in_detail || $SELF __fold toggle {3} {q}" \
-  --bind="ctrl-o:transform:$in_detail || $SELF __fold all '' {q}" \
-  --bind="ctrl-p:execute($SELF __pick)+reload($SELF __list)+transform-header($SELF __header)" \
+  --bind="start:execute-silent(echo \$FZF_PORT > \"\$BDBOARD_STATE/port\")" \
+  --bind="enter:$run(\"\$BDBOARD_SELF\" __explain {1})" \
+  --bind="ctrl-e:$run(\"\$BDBOARD_SELF\" __explain {1} force)" \
+  --bind="ctrl-r:reload(\"\$BDBOARD_SELF\" __list)" \
+  --bind="ctrl-f:transform:$in_detail || \"\$BDBOARD_SELF\" __fold toggle {3} {q}" \
+  --bind="ctrl-o:transform:$in_detail || \"\$BDBOARD_SELF\" __fold all '' {q}" \
+  --bind="ctrl-p:execute(\"\$BDBOARD_SELF\" __pick)+reload(\"\$BDBOARD_SELF\" __list)+transform-header(\"\$BDBOARD_SELF\" __header)" \
   "$(mode_key tab "$to_detail")" \
   "$(mode_key esc abort)" \
   "$(detail_key j preview-down 'put(j)')" \
