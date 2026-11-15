@@ -11,7 +11,7 @@
 # changes, full screen in mdfried), ctrl-e = regenerate explanation,
 # tab = detail mode (j/k, d/u, g/G scroll the detail pane; esc or tab back),
 # ctrl-d/ctrl-u = scroll detail, ctrl-p = switch project, ctrl-r = refresh now,
-# esc/ctrl-c = quit. The list auto-refreshes.
+# esc/ctrl-c = quit. The list auto-refreshes (paused in detail mode).
 #
 # Usage:
 #   bdboard                 board for the beads project containing $PWD (else pick one)
@@ -590,8 +590,11 @@ if [ "$interval" -gt 0 ] 2>/dev/null; then
     port_file="$BDBOARD_STATE/port"
     while [ ! -s "$port_file" ]; do sleep 0.2; done
     port="$(cat "$port_file")"
+    # A reload re-runs the preview, which snaps the detail pane back to its
+    # first line, so skip the refresh while scrolling in detail mode.
+    reload_cmd="transform:[ \"\$FZF_PROMPT\" = 'detail> ' ] || echo 'reload($SELF __list)'"
     while sleep "$interval"; do
-      curl -s -XPOST "localhost:$port" -d "reload($SELF __list)" >/dev/null 2>&1 || exit 0
+      curl -s -XPOST "localhost:$port" -d "$reload_cmd" >/dev/null 2>&1 || exit 0
     done
   ) &
   refresher=$!

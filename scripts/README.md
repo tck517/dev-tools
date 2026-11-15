@@ -126,7 +126,7 @@ Below the list, a detail pane shows the selected bead as formatted markdown: des
 | tab | Detail mode: `j`/`k` scroll a line, `d`/`u` half a page, `g`/`G` top or bottom; `esc` or `tab` returns to the list |
 | ctrl-d / ctrl-u | Scroll the detail pane from the list |
 | ctrl-p | Switch project |
-| ctrl-r | Refresh now (it also refreshes every 10 seconds) |
+| ctrl-r | Refresh now (auto-refresh every 10 seconds pauses in detail mode; ctrl-r or returning to the list refreshes) |
 | esc | Quit |
 
 ### Explanations (needs the Claude Code CLI)
@@ -186,7 +186,7 @@ brew install jq fzf mdfried tmux
 |---|---|---|
 | `BDBOARD_ROOTS` | `~/Projects:~/projects:~/src:~/code` | Colon-separated directories to search for projects |
 | `BDBOARD_DELIVERED_LABELS` | `committed,in-review` | Labels that mark an in-progress bead as delivered |
-| `BDBOARD_REFRESH` | `10` | Seconds between refreshes; `0` turns refresh off |
+| `BDBOARD_REFRESH` | `10` | Seconds between refreshes (paused in detail mode); `0` turns refresh off |
 | `BDBOARD_WIDTH` | `45%` | Pane width for `--split` |
 
 ## License
