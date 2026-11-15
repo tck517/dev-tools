@@ -116,6 +116,12 @@ The list is split into sections:
 
 Below the list, a detail pane shows the selected bead as formatted markdown: description, acceptance criteria, what it depends on, what it unblocks and its notes.
 
+**Frames and the detail label.** The board is drawn as three rounded boxes: the filter prompt, the list (labelled `beads`) and the detail pane below it. The detail pane's border is purple and its label follows the highlight:
+
+- On a bead row it reads `▶ <id>`, with the id of the highlighted bead, so you can see which bead the pane is showing.
+- On a section heading row it reads `legend`, and the pane shows what each section means.
+- In detail mode (tab) it lists the scroll keys instead: `j/k line  d/u half page  g/G top/bottom  esc back`. The label returns to the bead id when you go back to the list.
+
 **Folding.** On a big project one section can push the rest off screen. Put the highlight on a section heading, or on a bead in that section, and press ctrl-f to collapse the section to its heading row. The heading keeps its bead count and shows `collapsed`; ctrl-f again expands it. ctrl-o collapses every section, or expands them all if any is folded. Folds survive the auto-refresh and ctrl-r, and last until you quit the board (they are not saved between runs). Beads in a collapsed section are not in the list, so typing in the filter does **not** find them: expand the section first. If a fold empties a filtered list, ctrl-o unfolds everything. Folding does nothing in detail mode.
 
 **Delivered labels.** beads has no built-in "delivered" state. Some workflows leave a bead `in_progress` after its work is committed or its pull request is open, and mark it with a label. `bdboard` treats `in_progress` beads labelled `committed` or `in-review` as delivered; set `BDBOARD_DELIVERED_LABELS` to your own labels. A blocker counts as cleared once it is closed or delivered. If you don't use such labels, DELIVERED stays empty and nothing else changes.
