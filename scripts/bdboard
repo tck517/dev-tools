@@ -13,6 +13,14 @@
 # ctrl-d/ctrl-u = scroll detail, ctrl-p = switch project, ctrl-r = refresh now,
 # esc/ctrl-c = quit. The list auto-refreshes (paused in detail mode).
 #
+# Folding: ctrl-f collapses the highlighted section (on its heading or on a
+# bead in it) to its heading row, which keeps its count and shows "collapsed";
+# ctrl-f again expands it. ctrl-o collapses every section, or expands them
+# all if any is collapsed. Folds last until the board exits, and survive
+# refreshes. Beads in a collapsed section are not in the list, so typing in
+# the filter does not find them: expand the section first. If a fold empties a
+# filtered list, ctrl-o unfolds everything.
+#
 # Usage:
 #   bdboard                 board for the beads project containing $PWD (else pick one)
 #   bdboard -p <path>       board for <path>
@@ -85,17 +93,58 @@ header_text() { # [spinner frame]
   local pending="" frames=(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏)
   printf '%s   enter explain  tab detail  ctrl-e regenerate  ctrl-p project  ctrl-r refresh' \
     "$(project | sed "s#^$HOME#~#")"
+  printf '\n  ctrl-f fold section  ctrl-o fold all (collapsed beads are not filtered)'
   [ -d "$BDBOARD_STATE/pending" ] && pending="$(ls "$BDBOARD_STATE/pending" | tr '\n' ' ')"
   [ -n "$pending" ] && printf '\n  %s explaining %s' "${frames[$(( ${1:-0} % 10 ))]}" "$pending"
 }
 
 # ---------------------------------------------------------------- list
 
+# Folding. Rows are `id<TAB>display<TAB>section`; a heading row has id `-`
+# and its section key. Folded keys live one per line in $BDBOARD_STATE/folded,
+# so every reload (auto-refresh, ctrl-r, ctrl-p) honours them.
+SECTIONS="wip next dlv blocked done"
+
+folded_keys() { cat "$BDBOARD_STATE/folded" 2>/dev/null | tr '\n' ' '; }
+
+# Row number of a section's heading, so the cursor can land on it after a fold.
+heading_pos() {
+  list_beads | awk -F'\t' -v k="$1" '$1 == "-" && $3 == k { print NR; exit }'
+}
+
+# fold toggle <section> | fold all <section>: updates the folded set and
+# prints the fzf action that redraws the list with the cursor on the heading.
+fold() {
+  local mode="$1" key="$2" query="${3:-}" f="$BDBOARD_STATE/folded" k pos
+  if [ "$mode" = all ]; then
+    if [ -s "$f" ]; then : > "$f"; else
+      for k in $SECTIONS; do echo "$k"; done > "$f"
+    fi
+  else
+    case " $SECTIONS " in *" $key "*) ;; *) return ;; esac
+    if grep -qxF "$key" "$f" 2>/dev/null; then
+      grep -vxF "$key" "$f" > "$f.tmp"; mv "$f.tmp" "$f"
+    else
+      echo "$key" >> "$f"
+    fi
+  fi
+  # With a filter active the heading row may not be listed, so don't jump.
+  if [ -n "$query" ]; then
+    printf 'reload-sync(%s __list)' "$SELF"
+    return
+  fi
+  pos=""
+  case " $SECTIONS " in *" $key "*) pos="$(heading_pos "$key")" ;; esac
+  printf 'reload-sync(%s __list)+pos(%s)' "$SELF" "${pos:-1}"
+}
+
 list_beads() {
   cd "$(project)" 2>/dev/null || { printf -- '-\tproject not found\n'; return; }
   bd list --status all --limit 0 --json 2>/dev/null \
-    | jq -r --arg dl "${BDBOARD_DELIVERED_LABELS:-committed,in-review}" '
-    ($dl | split(",") | map(select(. != ""))) as $delivered_labels
+    | jq -r --arg dl "${BDBOARD_DELIVERED_LABELS:-committed,in-review}" \
+      --arg folded "$(folded_keys)" '
+    ($folded | split(" ")) as $folded_keys
+    | ($dl | split(",") | map(select(. != ""))) as $delivered_labels
     | def c(code): "\u001b[" + code + "m";
     def r: c("0");
     def labels: (.labels // []);
@@ -105,7 +154,13 @@ list_beads() {
     def parent: if .parent then c("2") + "(" + .parent + ") " + r else "" end;
     def row(extra): "\(.id)\t  " + c("1") + .id + r + "  " + c("2") + "P\(.priority)" + r
       + "  " + kind + parent + .title + (if extra != "" then "  " + c("36") + extra + r else "" end);
-    def head(color; text; n): "-\t" + c("1;" + color) + "■ " + text + " (\(n))" + r;
+    # A section: its heading (with count, marked when folded) and, unless
+    # folded, its beads. The last field is the section key.
+    def sec($k; color; text; $items; extra):
+      ($folded_keys | index($k) != null) as $f
+      | "-\t" + c("1;" + color) + (if $f then "▸ " else "▾ " end) + text
+          + " (\($items | length))" + (if $f then "  collapsed" else "" end) + r + "\t" + $k,
+        (if $f then empty else $items[] | row(extra) + "\t" + $k end);
     def byprio: sort_by(.priority, .id);
 
     # A blocker is cleared once it is closed or delivered (in workflows where
@@ -120,20 +175,16 @@ list_beads() {
     | ([ .[] | select(.status == "in_progress" and (delivered | not)) ] | byprio) as $wip
     | ([ .[] | select(.status == "in_progress" and delivered) ] | byprio) as $dlv
     | ([ .[] | select(.status == "closed") ] | sort_by(.closed_at // .updated_at) | reverse) as $done
-    | head("33"; "IN PROCESS"; ($wip | length)),
-      ($wip[] | row(.assignee // "")),
-      "-\t",
-      head("36"; "UP NEXT  ready to start"; ($next | length)),
-      ($next[] | row(labels | map(select(startswith("effort:"))) | join(" "))),
-      "-\t",
-      head("34"; "DELIVERED  awaiting merge"; ($dlv | length)),
-      ($dlv[] | row(refs)),
-      "-\t",
-      head("31"; "BLOCKED"; ($blocked | length)),
-      ($blocked[] | row("waits on " + (.waits | join(", ")))),
-      "-\t",
-      head("32"; "DONE"; ($done | length)),
-      ($done[] | row((.closed_at // "")[0:10]))
+    | sec("wip"; "33"; "IN PROCESS"; $wip; .assignee // ""),
+      "-\t\t",
+      sec("next"; "36"; "UP NEXT  ready to start"; $next;
+          labels | map(select(startswith("effort:"))) | join(" ")),
+      "-\t\t",
+      sec("dlv"; "34"; "DELIVERED  awaiting merge"; $dlv; refs),
+      "-\t\t",
+      sec("blocked"; "31"; "BLOCKED"; $blocked; "waits on " + (.waits | join(", "))),
+      "-\t\t",
+      sec("done"; "32"; "DONE"; $done; (.closed_at // "")[0:10])
   '
 }
 
@@ -541,6 +592,7 @@ case "$1" in
   __generate) generate "$2" "$3" "$4" "$5"; exit ;;
   __show) show_markdown "$2"; exit ;;
   __header) header_text; exit ;;
+  __fold) fold "$2" "$3" "${4:-}"; exit ;;
   __pick)
     p="$(pick_project)"; [ -n "$p" ] && echo "$p" > "$(project_file)" && remember_project "$p"; exit ;;
 esac
@@ -558,7 +610,7 @@ while [ $# -gt 0 ]; do
     -p) proj="$2"; args+=(-p "$2"); shift 2 ;;
     --pick) pick=1; args+=(--pick); shift ;;
     --split) split=1; shift ;;
-    -h|--help) sed -n '2,24p' "$SELF" | sed 's/^# \{0,1\}//'; exit ;;
+    -h|--help) awk 'NR>1 && !/^#/{exit} NR>1' "$SELF" | sed 's/^# \{0,1\}//'; exit ;;
     *) die "unknown argument: $1" ;;
   esac
 done
@@ -622,7 +674,7 @@ detail_key() { # key, action in detail mode, action in the list
 
 "$SELF" __list | fzf --ansi --layout=reverse --no-sort --track --listen \
   --with-shell='bash -c' \
-  --delimiter='\t' --with-nth=2.. \
+  --delimiter='\t' --with-nth=2 \
   --header="$(header_text)" --prompt='filter> ' --info=inline-right \
   --input-border=rounded \
   --list-border=rounded --list-label=' beads ' \
@@ -635,6 +687,8 @@ detail_key() { # key, action in detail mode, action in the list
   --bind="enter:$run($SELF __explain {1})" \
   --bind="ctrl-e:$run($SELF __explain {1} force)" \
   --bind="ctrl-r:reload($SELF __list)" \
+  --bind="ctrl-f:transform:$in_detail || $SELF __fold toggle {3} {q}" \
+  --bind="ctrl-o:transform:$in_detail || $SELF __fold all '' {q}" \
   --bind="ctrl-p:execute($SELF __pick)+reload($SELF __list)+transform-header($SELF __header)" \
   "$(mode_key tab "$to_detail")" \
   "$(mode_key esc abort)" \
