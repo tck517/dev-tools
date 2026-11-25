@@ -124,7 +124,8 @@ Below the list, a detail pane shows the selected bead as formatted markdown: des
 | up / down | Move through the beads |
 | type | Filter the list |
 | enter | Plain-language explanation of the bead (see below) |
-| ctrl-e | Regenerate the explanation |
+| `ctrl-e` | Regenerate the explanation |
+| `ctrl-g` | Stage `/deliver <id> ` in the adjacent tmux pane and focus it (without pressing Enter, so you can append guidance) |
 | tab | Detail mode: `j`/`k` scroll a line, `d`/`u` half a page, `g`/`G` top or bottom; `esc` or `tab` returns to the list |
 | ctrl-d / ctrl-u | Scroll the detail pane from the list |
 | ctrl-f | Fold or unfold the highlighted section (see Folding above) |
@@ -133,17 +134,17 @@ Below the list, a detail pane shows the selected bead as formatted markdown: des
 | ctrl-r | Refresh now (auto-refresh every 10 seconds pauses in detail mode; ctrl-r or returning to the list refreshes) |
 | esc | Quit |
 
-### Explanations (needs the Claude Code CLI)
+### Explanations (Claude Code or Antigravity CLI)
 
-Enter asks [Claude Code](https://claude.com/claude-code) (`claude -p`) to explain the bead for someone who isn't an engineer: what it is, what it delivers, why now, a risk table, and what to settle before starting.
+Enter asks [Claude Code](https://claude.com/claude-code) (`claude -p`, the default) or the Antigravity CLI (`agy -p --mode plan --sandbox`, opt-in via `--agent agy` or `BDBOARD_AGENT=agy`) to explain the bead for someone who isn't an engineer: what it is, what it delivers, why now, a risk table, and what to settle before starting.
 
-- It runs read-only: Claude may only run `bd show`, `bd dep list`, `bd list`, `git log`, `git branch` and read files. It cannot edit files or change beads.
+- It runs read-only: Claude is restricted to `bd show`, `bd dep list`, `bd list`, `git log`, `git branch`, and file reads; `agy` runs with `--mode plan --sandbox`. Neither can edit files or change beads.
 - In tmux it runs in the background with a spinner in the board's header, then opens in its own tmux window when ready (`q` closes it). Outside tmux you wait for it.
-- It is cached in `~/.cache/bdboard` until the bead or the explainer changes. Anything that updates the bead (a note, label or status), or any edit to the project's `.claude/commands/explain-bead.md` (or to bdboard's built-in prompt), makes the next enter ask again.
-- If the project has its own `.claude/commands/explain-bead.md`, that command is used instead of the built-in prompt.
-- Each explanation is a Claude call and uses your Claude plan or API credits.
+- It is cached in `~/.cache/bdboard` until the bead or the explainer changes. Claude and `agy` use separate cache filenames so switching agents never clobbers cached explanations.
+- If the project has its own explainer (`.claude/commands/explain-bead.md` for Claude; `.agents/plugins/*/skills/explain-bead/SKILL.md` or `.agents/skills/explain-bead/SKILL.md` for `agy`), that command/skill is used instead of the built-in prompt.
+- Each explanation uses your configured agent's plan or API credits.
 
-Without `claude` installed, the board works and enter tells you explanations are unavailable.
+Without the selected CLI installed, the board still works and enter tells you explanations are unavailable.
 
 ### Usage
 
@@ -151,6 +152,7 @@ Without `claude` installed, the board works and enter tells you explanations are
 bdboard                 # the beads project containing the current directory, else a picker
 bdboard -p <path>       # a specific project
 bdboard --pick          # choose a project first
+bdboard --agent agy     # use Antigravity CLI for enter / ctrl-e explanations (default: claude)
 bdboard --split         # open the board in a new tmux pane to the right
 ```
 
@@ -190,6 +192,9 @@ brew install jq fzf mdfried tmux
 |---|---|---|
 | `BDBOARD_ROOTS` | `~/Projects:~/projects:~/src:~/code` | Colon-separated directories to search for projects |
 | `BDBOARD_DELIVERED_LABELS` | `committed,in-review` | Labels that mark an in-progress bead as delivered |
+| `BDBOARD_AGENT` | `claude` | Explainer CLI for `enter` / `ctrl-e`: `claude` (default) or `agy` |
+| `BDBOARD_MODEL` | *(unset)* | Optional `--model` override when `BDBOARD_AGENT=agy` |
+| `BDBOARD_EFFORT` | *(unset)* | Optional `--effort` override when `BDBOARD_AGENT=agy` (`low`, `medium`, `high`, `xhigh`, `max`) |
 | `BDBOARD_REFRESH` | `10` | Seconds between refreshes (paused in detail mode); `0` turns refresh off |
 | `BDBOARD_WIDTH` | `45%` | Pane width for `--split` |
 
