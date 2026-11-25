@@ -7,8 +7,9 @@
 # BLOCKED (open, waiting on another bead), DONE (closed).
 #
 # Keys: up/down move, type to filter, enter = plain-language explanation
-# (Claude, cached until the bead or the project's /explain-bead command
+# (Claude or agy, cached until the bead or the project's /explain-bead skill
 # changes, full screen in mdfried), ctrl-e = regenerate explanation,
+# ctrl-g = stage `/deliver <id> ` in the adjacent tmux pane and focus it,
 # tab = detail mode (j/k, d/u, g/G scroll the detail pane; esc or tab back),
 # ctrl-d/ctrl-u = scroll detail, ctrl-p = switch project, ctrl-r = refresh now,
 # esc/ctrl-c = quit. The list auto-refreshes (paused in detail mode).
@@ -25,6 +26,7 @@
 #   bdboard                 board for the beads project containing $PWD (else pick one)
 #   bdboard -p <path>       board for <path>
 #   bdboard --pick          choose the project first
+#   bdboard --agent <cli>   explainer CLI: claude (default) or agy
 #   bdboard --split [...]   open the board in a new tmux pane beside this one
 #
 # Env:
@@ -32,11 +34,14 @@
 #                             (default: ~/Projects ~/projects ~/src ~/code)
 #   BDBOARD_DELIVERED_LABELS  comma-separated labels that mark an in-progress
 #                             bead as delivered (default: committed,in-review)
+#   BDBOARD_AGENT             explainer CLI: claude (default) or agy
+#   BDBOARD_MODEL             optional model override when BDBOARD_AGENT=agy
+#   BDBOARD_EFFORT            optional effort override when BDBOARD_AGENT=agy (low|medium|high|xhigh|max)
 #   BDBOARD_REFRESH           auto-refresh seconds (default: 10, 0 disables)
 #   BDBOARD_WIDTH             pane width for --split (default: 45%)
 #
-# Requires bash, bd, jq, fzf 0.51+, curl, python3. Optional: claude (enter),
-# tmux, mdfried or glow (to show explanations).
+# Requires bash, bd, jq, fzf 0.51+, curl, python3. Optional: claude or agy
+# (enter), tmux, mdfried or glow (to show explanations).
 
 SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
 CACHE_ROOT="${XDG_CACHE_HOME:-$HOME/.cache}/bdboard"
@@ -93,7 +98,7 @@ header_text() { # [spinner frame]
   local pending="" frames=(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏)
   printf '%s   enter explain  tab detail  ctrl-e regenerate  ctrl-p project  ctrl-r refresh' \
     "$(project | sed "s#^$HOME#~#")"
-  printf '\n  ctrl-f fold section  ctrl-o fold all (collapsed beads are not filtered)'
+  printf '\n  ctrl-f fold section  ctrl-o fold all  ctrl-g deliver (tmux)'
   [ -d "$BDBOARD_STATE/pending" ] && pending="$(ls "$BDBOARD_STATE/pending" | tr '\n' ' ')"
   [ -n "$pending" ] && printf '\n  %s explaining %s' "${frames[$(( ${1:-0} % 10 ))]}" "$pending"
 }
@@ -467,9 +472,33 @@ One to three bullets of questions worth answering first, or "Nothing
 blocking."
 TXT
 
+explainer_agent() {
+  echo "${BDBOARD_AGENT:-claude}"
+}
+
+# Locate the project's explain-bead definition for the active agent.
+explainer_file() { # dir
+  local dir="$1" agent f
+  agent="$(explainer_agent)"
+  if [ "$agent" = "agy" ]; then
+    for f in "$dir"/.agents/plugins/*/skills/explain-bead/SKILL.md \
+             "$dir/.agents/skills/explain-bead/SKILL.md"; do
+      if [ -f "$f" ]; then
+        echo "$f"
+        return
+      fi
+    done
+  fi
+  if [ -f "$dir/.claude/commands/explain-bead.md" ]; then
+    echo "$dir/.claude/commands/explain-bead.md"
+  fi
+}
+
 explainer_sum() { # dir  (checksum of whatever writes the explanation)
-  if [ -f "$1/.claude/commands/explain-bead.md" ]; then
-    cksum < "$1/.claude/commands/explain-bead.md"
+  local ef
+  ef="$(explainer_file "$1")"
+  if [ -n "$ef" ]; then
+    cksum < "$ef"
   else
     printf '%s' "$EXPLAIN_PROMPT" | cksum
   fi | cut -d' ' -f1
@@ -477,55 +506,105 @@ explainer_sum() { # dir  (checksum of whatever writes the explanation)
 
 # Keyed on the bead's updated_at and the explainer's checksum, so editing
 # the bead or the project's /explain-bead command both regenerate.
+# Claude keeps the legacy filename format so existing caches stay warm;
+# agy gets its own suffix so the two agents never clobber each other.
 cache_path() { # dir id
-  local updated
+  local updated agent suffix=""
+  agent="$(explainer_agent)"
   updated="$(cd "$1" && bd show "$2" --json 2>/dev/null \
     | jq -r '(if type == "array" then .[0] else . end).updated_at // "x"' | tr -dc '0-9A-Za-z')"
-  echo "$CACHE_ROOT/$(echo "$1" | tr '/' '_')/$2@$updated-$(explainer_sum "$1").md"
+  if [ "$agent" != "claude" ]; then
+    suffix="-${agent}"
+    [ -n "${BDBOARD_MODEL:-}" ] && suffix="${suffix}-$(printf '%s' "$BDBOARD_MODEL" | tr -dc '0-9A-Za-z._-')"
+    [ -n "${BDBOARD_EFFORT:-}" ] && suffix="${suffix}-$(printf '%s' "$BDBOARD_EFFORT" | tr -dc '0-9A-Za-z')"
+  fi
+  echo "$CACHE_ROOT/$(echo "$1" | tr '/' '_')/$2@$updated${suffix}-$(explainer_sum "$1").md"
 }
 
-run_claude() { # dir id out err
-  local prompt
-  if [ -f "$1/.claude/commands/explain-bead.md" ]; then
-    prompt="/explain-bead $2"   # the project's own command wins
+run_explainer() { # dir id out err
+  local dir="$1" id="$2" out="$3" err="$4" agent prompt ef
+  agent="$(explainer_agent)"
+  ef="$(explainer_file "$dir")"
+  if [ "$agent" = "agy" ]; then
+    if [ -n "$ef" ] && [[ "$ef" == */SKILL.md ]]; then
+      prompt="/explain-bead $id"
+    else
+      prompt="${EXPLAIN_PROMPT//\{ID\}/$id}"
+    fi
+    local agy_args=(-p "$prompt" --mode plan --sandbox)
+    [ -n "${BDBOARD_MODEL:-}" ] && agy_args+=(--model "$BDBOARD_MODEL")
+    [ -n "${BDBOARD_EFFORT:-}" ] && agy_args+=(--effort "$BDBOARD_EFFORT")
+    (cd "$dir" && agy "${agy_args[@]}" >"$out" 2>"$err") && [ -s "$out" ]
   else
-    prompt="${EXPLAIN_PROMPT//\{ID\}/$2}"
+    if [ -n "$ef" ]; then
+      prompt="/explain-bead $id"   # the project's own command wins
+    else
+      prompt="${EXPLAIN_PROMPT//\{ID\}/$id}"
+    fi
+    (cd "$dir" && claude -p "$prompt" --no-session-persistence \
+      --allowedTools 'Bash(bd show:*)' 'Bash(bd dep list:*)' 'Bash(bd list:*)' \
+                     'Bash(git log:*)' 'Bash(git branch:*)' Read Grep Glob \
+      --disallowedTools Edit Write NotebookEdit \
+      >"$out" 2>"$err") && [ -s "$out" ]
   fi
-  (cd "$1" && claude -p "$prompt" --no-session-persistence \
-    --allowedTools 'Bash(bd show:*)' 'Bash(bd dep list:*)' 'Bash(bd list:*)' \
-                   'Bash(git log:*)' 'Bash(git branch:*)' Read Grep Glob \
-    --disallowedTools Edit Write NotebookEdit \
-    >"$3" 2>"$4") && [ -s "$3" ]
 }
 
 save_cache() { # tmp cache
-  mkdir -p "$(dirname "$2")"
-  rm -f "${2%@*}@"*.md
+  local dir base f
+  dir="$(dirname "$2")"
+  base="${2%@*}@"
+  mkdir -p "$dir"
+  if [ "$(explainer_agent)" = "agy" ]; then
+    rm -f "${base}"*-agy-*.md
+  else
+    for f in "${base}"*.md; do
+      [ -e "$f" ] || continue
+      case "$f" in *-agy-*.md) ;; *) rm -f "$f" ;; esac
+    done
+  fi
   mv "$1" "$2"
 }
 
+stage_deliver() { # id
+  local id="$1" target
+  [ "$id" = "-" ] || [ -z "$id" ] && return
+  if [ -z "${TMUX:-}" ]; then
+    notify "bdboard: ctrl-g requires tmux"
+    return
+  fi
+  target="$(tmux list-panes -F '#{pane_id}' 2>/dev/null | grep -vxF "${TMUX_PANE:-}" | head -n 1)"
+  if [ -z "$target" ]; then
+    notify "bdboard: no other pane in this tmux window"
+    return
+  fi
+  tmux send-keys -t "$target" -l "/deliver $id "
+  tmux select-pane -t "$target"
+}
+
 explain_bead() { # id [force]
-  local id="$1" force="$2" dir cache
+  local id="$1" force="$2" dir cache agent
   [ "$id" = "-" ] || [ -z "$id" ] && return
   dir="$(project)"
+  agent="$(explainer_agent)"
   cache="$(cache_path "$dir" "$id")"
   if [ "$force" != "force" ] && [ -s "$cache" ]; then
     show_window "$dir" "$id" "$cache"
-  elif ! command -v claude >/dev/null 2>&1; then
-    notify "bdboard: explanations need the claude CLI (https://claude.com/claude-code)"
+  elif ! command -v "$agent" >/dev/null 2>&1; then
+    notify "bdboard: explanations need the $agent CLI on PATH"
   elif [ -n "$TMUX" ]; then
     mkdir -p "$BDBOARD_STATE/pending"
     [ -e "$BDBOARD_STATE/pending/$id" ] && return
     : > "$BDBOARD_STATE/pending/$id"
     # Run under the tmux server so it outlives fzf's execute-silent.
-    tmux run-shell -b "$(printf 'BDBOARD_STATE=%q PATH=%q %q __generate %q %q %q %q >/dev/null 2>>%q' \
-      "$BDBOARD_STATE" "$PATH" "$SELF" "$dir" "$id" "$cache" "$(board_session)" \
+    tmux run-shell -b "$(printf 'BDBOARD_STATE=%q BDBOARD_AGENT=%q BDBOARD_MODEL=%q BDBOARD_EFFORT=%q PATH=%q %q __generate %q %q %q %q >/dev/null 2>>%q' \
+      "$BDBOARD_STATE" "$agent" "${BDBOARD_MODEL:-}" "${BDBOARD_EFFORT:-}" "$PATH" \
+      "$SELF" "$dir" "$id" "$cache" "$(board_session)" \
       "$BDBOARD_STATE/generate.log")"
   else
     local tmp
     tmp="$(mktemp)"
-    printf '\033[1mExplaining %s with Claude\033[0m (usually under a minute; cached afterwards)\n' "$id"
-    if run_claude "$dir" "$id" "$tmp" "$tmp.err"; then
+    printf '\033[1mExplaining %s with %s\033[0m (usually under a minute; cached afterwards)\n' "$id" "$agent"
+    if run_explainer "$dir" "$id" "$tmp" "$tmp.err"; then
       save_cache "$tmp" "$cache"; rm -f "$tmp.err"
       show_markdown "$cache"
     else
@@ -566,7 +645,7 @@ post() { # fzf action, sent to the board over its --listen port
 generate() { # dir id cache session  (background, BDBOARD_STATE inherited)
   local dir="$1" id="$2" cache="$3" session="$4" tmp i=0
   tmp="$(mktemp)"
-  run_claude "$dir" "$id" "$tmp" "$tmp.err" &
+  run_explainer "$dir" "$id" "$tmp" "$tmp.err" &
   local pid=$!
   while kill -0 "$pid" 2>/dev/null; do
     post "change-header:$(header_text "$i")"; i=$((i + 1)); sleep 0.25
@@ -589,6 +668,7 @@ case "$1" in
   __list) list_beads; exit ;;
   __preview) preview_bead "$2"; exit ;;
   __explain) explain_bead "$2" "$3"; exit ;;
+  __deliver) stage_deliver "$2"; exit ;;
   __generate) generate "$2" "$3" "$4" "$5"; exit ;;
   __show) show_markdown "$2"; exit ;;
   __header) header_text; exit ;;
@@ -609,11 +689,20 @@ while [ $# -gt 0 ]; do
   case "$1" in
     -p) proj="$2"; args+=(-p "$2"); shift 2 ;;
     --pick) pick=1; args+=(--pick); shift ;;
+    --agent)
+      [ $# -ge 2 ] || die "--agent requires a value (claude or agy)"
+      BDBOARD_AGENT="$2"; export BDBOARD_AGENT
+      args+=(--agent "$2"); shift 2 ;;
     --split) split=1; shift ;;
     -h|--help) awk 'NR>1 && !/^#/{exit} NR>1' "$SELF" | sed 's/^# \{0,1\}//'; exit ;;
     *) die "unknown argument: $1" ;;
   esac
 done
+
+case "$(explainer_agent)" in
+  claude|agy) ;;
+  *) die "unknown agent '$(explainer_agent)' (expected claude or agy)" ;;
+esac
 
 if [ "$split" = 1 ]; then
   [ -n "$TMUX" ] || die "--split needs to run inside tmux"
@@ -692,6 +781,7 @@ export BDBOARD_SELF
   --bind="start:execute-silent(echo \$FZF_PORT > \"\$BDBOARD_STATE/port\")" \
   --bind="enter:$run(\"\$BDBOARD_SELF\" __explain {1})" \
   --bind="ctrl-e:$run(\"\$BDBOARD_SELF\" __explain {1} force)" \
+  --bind="ctrl-g:execute-silent(\"\$BDBOARD_SELF\" __deliver {1})" \
   --bind="ctrl-r:reload(\"\$BDBOARD_SELF\" __list)" \
   --bind="ctrl-f:transform:$in_detail || \"\$BDBOARD_SELF\" __fold toggle {3} {q}" \
   --bind="ctrl-o:transform:$in_detail || \"\$BDBOARD_SELF\" __fold all '' {q}" \
