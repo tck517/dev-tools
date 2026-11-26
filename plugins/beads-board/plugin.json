@@ -1,0 +1,11 @@
+{
+  "name": "beads-board",
+  "displayName": "Beads Board",
+  "version": "1.0.0",
+  "description": "Interactive Beads (bd) board and Epic Tech Tree MCP App for Antigravity's side pane and sidebar — mirrors bdboard sections with two-way chat context pills, one-click /deliver, background /explain-bead, PR links, and side-pane file opening.",
+  "logo": "assets/logo.svg",
+  "suggestedPrompts": [
+    "Open the Beads Board side pane",
+    "Show the Epic Tech Tree in Beads Board"
+  ]
+}

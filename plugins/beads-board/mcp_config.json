@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "board": {
+      "command": "bash",
+      "args": [
+        "${PLUGIN_ROOT}/bin/beads-board-server",
+        "--data_dir=${PLUGIN_DATA}"
+      ]
+    }
+  }
+}

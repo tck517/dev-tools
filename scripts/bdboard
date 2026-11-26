@@ -196,10 +196,19 @@ list_beads() {
 # ---------------------------------------------------------------- preview
 
 bead_markdown() {
-  bd show "$1" --json 2>/dev/null | jq -r '
+  (bd show "$1" --include-comments --json 2>/dev/null || bd show "$1" --json 2>/dev/null) | jq -r '
     (if type == "array" then .[0] else . end) as $b
     | def demote: gsub("(?m)^(?<h>#+) "; "#\(.h) ") | gsub("(?m)^\\[(?<x>[ xX])\\] "; "- [\(.x)] ");
       def deps(xs): (xs // []) | map("- `\(.status)` **\(.id)** \(.title) _(\(.dependency_type))_") | join("\n");
+      def fmt_comments(cs):
+        (cs // [])
+        | map(select((.text // .body // "") != ""))
+        | map(
+            ((if (.author // "") != "" then "**\(.author)**" else "" end)
+              + (if (.created_at // "") != "" then (if (.author // "") != "" then " · " else "" end) + "_\((.created_at)[0:16] | sub("T"; " "))_" else "" end)) as $hdr
+            | (if $hdr != "" then $hdr + "\n\n" else "" end) + ((.text // .body) | demote)
+          )
+        | join("\n\n---\n\n");
     "# \($b.id) · \($b.title)\n",
     "`\($b.status)` · **P\($b.priority)** · \($b.issue_type)"
       + (if $b.parent then " · epic **\($b.parent)**" else "" end)
@@ -216,7 +225,10 @@ bead_markdown() {
     (if ($b.design // "") != "" then "\n## Design\n\n" + ($b.design | demote) else empty end),
     (if deps($b.dependencies) != "" then "\n## Depends on\n\n" + deps($b.dependencies) else empty end),
     (if deps($b.dependents) != "" then "\n## Unblocks\n\n" + deps($b.dependents) else empty end),
-    (if ($b.notes // "") != "" then "\n## Notes\n\n" + ($b.notes | split("\n") | map(select(. != "") | "- " + .) | join("\n")) else empty end)
+    (if ($b.notes // "") != "" then
+       "\n## Notes\n\n" + (if ($b.notes | test("(?m)^(#{1,6} |[-*] |\\d+\\. |```)")) then ($b.notes | demote) else ($b.notes | split("\n") | map(select(. != "") | "- " + .) | join("\n")) end)
+     else empty end),
+    (if fmt_comments($b.comments) != "" then "\n## Comments\n\n" + fmt_comments($b.comments) else empty end)
   '
 }
 
@@ -227,24 +239,40 @@ import re, sys
 W = max(20, int(sys.argv[1]) if len(sys.argv) > 1 else 80)
 E = lambda c: "\x1b[" + c + "m"
 R = E("0")
-TEXT, DIM, BOLD = E("38;5;252"), E("38;5;245"), E("1;38;5;255")
+TEXT, DIM, BOLD, ITALIC = E("38;5;252"), E("38;5;245"), E("1;38;5;255"), E("3;38;5;252")
 CODE = E("38;5;217;48;5;236")
 HEAD = {1: E("1;38;5;111"), 2: E("1;38;5;111"), 3: E("1;38;5;180")}
 H_DEEP = E("1;38;5;150")
 
+def strip_links(text):
+    """Expand [label](url) outside code spans; only show http(s) URLs."""
+    parts = re.split(r"(`[^`]*`)", text)
+    for idx in range(0, len(parts), 2):
+        parts[idx] = re.sub(
+            r"\[([^\]]+)\]\(((?:[^()]+|\([^()]*\))+)\)",
+            lambda m: f"{m.group(1)} ({m.group(2).strip()})"
+            if re.match(r"^https?://\S+$", m.group(2).strip(), re.I)
+            else m.group(1),
+            parts[idx],
+        )
+    return "".join(parts)
+
 def words(text):
-    """Split inline markdown into (word, style) pairs: **bold**, `code`, _dim_."""
-    out, bold, code = [], False, False
-    for tok in re.split(r"(\*\*|`)", text):
+    """Split inline markdown into (word, style) pairs: **bold**, *italic*, `code`, _dim_."""
+    text = strip_links(text)
+    out, bold, italic, code = [], False, False, False
+    for tok in re.split(r"(\*\*|(?<!\*)\*(?!\*)|`)", text):
         if tok == "**" and not code:
             bold = not bold; continue
+        if tok == "*" and not code:
+            italic = not italic; continue
         if tok == "`":
             code = not code; continue
         for i, w in enumerate(tok.split(" ")):
             if i > 0:
                 out.append((None, None))  # a space
             if w:
-                style = CODE if code else BOLD if bold else TEXT
+                style = CODE if code else BOLD if bold else ITALIC if italic else TEXT
                 m = re.fullmatch(r"_(.+)_", w) or re.fullmatch(r"_\((.+)\)_", w)
                 if m and not code:
                     w, style = w.strip("_"), DIM

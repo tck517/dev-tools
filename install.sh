@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Link dotfiles/ into $HOME. Safe to re-run: existing links are re-pointed,
-# and a real file in the way is moved aside to <name>.backup-<timestamp>.
+# Link dotfiles/ and plugins/ into $HOME. Safe to re-run: existing links are
+# re-pointed, and a real file in the way is moved aside to
+# <name>.backup-<timestamp>.
 #
 # Usage: ./install.sh [--dry-run]
 #
@@ -19,6 +20,7 @@ links=(
   "dotfiles/kitty.conf:$HOME/.config/kitty/kitty.conf"
   "dotfiles/fish/config.fish:$HOME/.config/fish/config.fish"
   "dotfiles/fish/conf.d:$HOME/.config/fish/conf.d"
+  "plugins/beads-board:$HOME/.gemini/config/plugins/beads-board"
 )
 
 run() {

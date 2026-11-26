@@ -1,11 +1,12 @@
 # dev-tools
 
-Two kinds of thing live here. Keep them apart:
+Three kinds of thing live here. Keep them apart:
 
 | Directory | What belongs there | How it's used |
 |---|---|---|
 | `dotfiles/` | Config files, nothing that runs on its own | Linked into `$HOME` by `install.sh` |
 | `scripts/` | Commands you run by name | On `PATH` via `dotfiles/fish/conf.d/01-paths.fish` |
+| `plugins/` | Antigravity plugins (MCP Apps, etc.) | Linked into `~/.gemini/config/plugins/` by `install.sh` |
 
 - A file that only serves this repo (checks, helpers) goes in neither: put it
   in `tools/`, so it never lands on `PATH`.
@@ -16,10 +17,10 @@ Two kinds of thing live here. Keep them apart:
 
 ## Commands
 - **Install / re-point links**: `./install.sh` (`--dry-run` to preview)
-- **Check everything loads**: `tools/validate.sh [all|dotfiles|scripts]`
+- **Check everything loads**: `tools/validate.sh [all|dotfiles|scripts|plugins]`
   (fish syntax, tmux and Neovim load in isolation, install.sh against a temp
-  HOME, `bash -n` + `shellcheck` on scripts). Never push with it failing, and
-  never `git push --no-verify`.
+  HOME, `bash -n` + `shellcheck` on scripts, and plugin unit tests). Never push
+  with it failing, and never `git push --no-verify`.
 - **Enable the pre-push check** (once per clone):
   `git config core.hooksPath tools/hooks`
 - **Live smoke test**: `tools/smoke.sh` (fish and headless Neovim inside a
