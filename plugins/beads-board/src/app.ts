@@ -6,6 +6,11 @@ import {
 import { z } from "zod";
 import { escapeHtml, renderMarkdown } from "./markdown";
 import {
+  boardFingerprint,
+  createAutoRefresher,
+  findBeadSummary,
+} from "./refresh";
+import {
   buildTechTreeLayout,
   collectLineage,
   edgeKey,
@@ -128,10 +133,14 @@ let attachedId: string | null = null;
 let toastMsg = "";
 let toastTimer: number | null = null;
 let busy = false;
+let pollInFlight = false;
 let showCompletedEpics = false;
 let pinnedEpicId: string | null = null;
 let lastTechTreeLayout: TechTreeLayout | null = null;
 let treeResizeObserver: ResizeObserver | null = null;
+
+const AUTO_REFRESH_INTERVAL_MS = 10_000;
+const FOCUS_REFRESH_COOLDOWN_MS = 3_000;
 
 const rootEl = document.getElementById("root")!;
 
@@ -164,10 +173,25 @@ function caps() {
   };
 }
 
-function applyPayload(data: BoardPayload | undefined) {
+function formatRefreshTooltip(iso: string | undefined): string {
+  const base = "Refresh live bd state (auto-refreshes every 10s)";
+  if (!iso) return base;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return base;
+  return `${base} · updated ${d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}`;
+}
+
+function applyPayload(
+  data: BoardPayload | undefined,
+  opts: { preserveUiState?: boolean } = {},
+) {
   if (!data) return;
+  const prevBoard = board;
+  const prevFp = boardFingerprint(prevBoard);
+  const nextFp = boardFingerprint(data);
   board = data;
-  if (data.prefs) {
+
+  if (!opts.preserveUiState && data.prefs) {
     if (data.prefs.view === "board" || data.prefs.view === "techtree") {
       view = data.prefs.view;
     }
@@ -178,8 +202,83 @@ function applyPayload(data: BoardPayload | undefined) {
       collapsed = new Set(data.prefs.collapsed);
     }
   }
+
+  if (opts.preserveUiState && prevFp === nextFp) {
+    // Nothing changed on disk: update tooltip only, avoiding any DOM redraw
+    const refreshBtn = document.getElementById("refresh-btn");
+    if (refreshBtn) refreshBtn.title = formatRefreshTooltip(data.refreshedAt);
+    return;
+  }
+
   render();
+
+  if (opts.preserveUiState && selectedId && !detailLoading) {
+    const prevItem = findBeadSummary(prevBoard?.sections, selectedId);
+    const nextItem = findBeadSummary(data.sections, selectedId);
+    if (JSON.stringify(prevItem) !== JSON.stringify(nextItem)) {
+      void refreshSelectedDetailSilently(selectedId);
+    }
+  }
 }
+
+async function refreshSelectedDetailSilently(id: string) {
+  const project = board?.project;
+  if (!project || selectedId !== id) return;
+  try {
+    const res = await app.callServerTool({
+      name: "beads_board_detail",
+      arguments: { project, id },
+    });
+    if (selectedId !== id || board?.project !== project) return;
+    const sc = res.structuredContent as
+      | { ok: boolean; bead?: BeadDetail; error?: string }
+      | undefined;
+    if (sc?.ok && sc.bead) {
+      selectedDetail = sc.bead;
+      render();
+    }
+  } catch {
+    // non-fatal during background refresh
+  }
+}
+
+async function pollBoardSilently() {
+  const project = board?.project;
+  if (!project || busy || pollInFlight || detailLoading || !caps().canServerTools) {
+    return;
+  }
+  const sel = window.getSelection?.()?.toString().trim();
+  if (sel) return;
+  pollInFlight = true;
+  try {
+    const res = await app.callServerTool({
+      name: "beads_board_refresh",
+      arguments: { project, view, background: true },
+    });
+    if (board?.project !== project) return;
+    const sc = res.structuredContent as BoardPayload | undefined;
+    if (sc) {
+      applyPayload(sc, { preserveUiState: true });
+    }
+  } catch {
+    // non-fatal; retry on next poll tick
+  } finally {
+    pollInFlight = false;
+  }
+}
+
+const autoRefresher = createAutoRefresher({
+  intervalMs: AUTO_REFRESH_INTERVAL_MS,
+  focusCooldownMs: FOCUS_REFRESH_COOLDOWN_MS,
+  isVisible: () => document.visibilityState === "visible",
+  canPoll: () =>
+    Boolean(board?.project) &&
+    caps().canServerTools &&
+    !busy &&
+    !pollInFlight &&
+    !detailLoading,
+  poll: pollBoardSilently,
+});
 
 async function persistPrefs() {
   if (!board?.project) return;
@@ -217,6 +316,7 @@ async function refreshBoard(projectOverride?: string) {
         pinnedEpicId = null;
       }
       applyPayload(sc);
+      autoRefresher.markRefreshed();
       showToast(`Refreshed ${sc.projectName || "board"}`);
     }
   } catch (err) {
@@ -967,6 +1067,17 @@ function render() {
     return;
   }
 
+  const prevContentScroll =
+    rootEl.querySelector<HTMLElement>(".content")?.scrollTop ?? 0;
+  const prevDetailScroll =
+    rootEl.querySelector<HTMLElement>(".detail-body")?.scrollTop ?? 0;
+  const activeFilter =
+    document.activeElement?.id === "filter-input"
+      ? (document.activeElement as HTMLInputElement)
+      : null;
+  const filterSelStart = activeFilter?.selectionStart ?? null;
+  const filterSelEnd = activeFilter?.selectionEnd ?? null;
+
   const projectOptions = (board.projects || [])
     .map(
       (p) =>
@@ -984,7 +1095,7 @@ function render() {
           <button class="seg-btn ${view === "board" ? "active" : ""}" data-view="board">Board</button>
           <button class="seg-btn ${view === "techtree" ? "active" : ""}" data-view="techtree">Tech Tree</button>
         </div>
-        <button class="icon-btn" id="refresh-btn" title="Refresh live bd state" ${busy ? "disabled" : ""}>${busy ? "…" : "↻"}</button>
+        <button class="icon-btn" id="refresh-btn" title="${esc(formatRefreshTooltip(board.refreshedAt))}" ${busy ? "disabled" : ""}>${busy ? "…" : "↻"}</button>
       </div>
       <div class="topbar-row">
         <input class="search-input" id="filter-input" type="search" placeholder="Filter by id, title, epic, effort, safety…" value="${esc(filterText)}" />
@@ -1133,6 +1244,26 @@ function render() {
     treeResizeObserver.disconnect();
     treeResizeObserver = null;
   }
+
+  const nextContent = rootEl.querySelector<HTMLElement>(".content");
+  if (nextContent && prevContentScroll > 0) {
+    nextContent.scrollTop = prevContentScroll;
+  }
+  const nextDetail = rootEl.querySelector<HTMLElement>(".detail-body");
+  if (nextDetail && prevDetailScroll > 0) {
+    nextDetail.scrollTop = prevDetailScroll;
+  }
+  if (activeFilter) {
+    const nextFilter = document.getElementById(
+      "filter-input",
+    ) as HTMLInputElement | null;
+    if (nextFilter) {
+      nextFilter.focus();
+      if (filterSelStart !== null && filterSelEnd !== null) {
+        nextFilter.setSelectionRange(filterSelStart, filterSelEnd);
+      }
+    }
+  }
 }
 
 // Register handlers BEFORE connect() per MCP Apps lifecycle
@@ -1142,6 +1273,7 @@ app.ontoolinput = () => {
 
 app.ontoolresult = (result) => {
   applyPayload(result.structuredContent as BoardPayload | undefined);
+  autoRefresher.markRefreshed();
 };
 
 app.onhostcontextchanged = (ctx) => {
@@ -1156,3 +1288,13 @@ if (initialCtx?.styles?.variables) {
   applyHostStyleVariables(initialCtx.styles.variables);
 }
 render();
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") {
+    void autoRefresher.notifyVisible();
+  }
+});
+window.addEventListener("focus", () => {
+  void autoRefresher.notifyVisible();
+});
+autoRefresher.start();

@@ -67,8 +67,23 @@ function resolveProject(requested, projects, prefs) {
   return requested || process.env.BDBOARD_DEFAULT_PROJECT || process.cwd();
 }
 
+const PROJECT_CACHE_TTL_MS = 60_000;
+let cachedProjects = null;
+let cachedProjectsAt = 0;
+
+function getProjects(useCache = false) {
+  const now = Date.now();
+  if (useCache && cachedProjects && now - cachedProjectsAt < PROJECT_CACHE_TTL_MS) {
+    return cachedProjects;
+  }
+  cachedProjects = discoverProjects();
+  cachedProjectsAt = now;
+  return cachedProjects;
+}
+
 function buildBoardResponse(args = {}) {
-  const projects = discoverProjects();
+  const isBackground = Boolean(args.background);
+  const projects = getProjects(isBackground);
   const prefs = readPrefs();
   const project = resolveProject(args.project, projects, prefs);
   const view = args.view === "techtree" || args.view === "board"
@@ -76,7 +91,7 @@ function buildBoardResponse(args = {}) {
     : prefs.view || "board";
   const filter = typeof args.filter === "string" ? args.filter : "";
 
-  if (args.project || args.view) {
+  if (!isBackground && (args.project || args.view)) {
     writePrefs({ project, view });
   }
 
@@ -183,6 +198,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         properties: {
           project: { type: "string" },
           view: { type: "string", enum: ["board", "techtree"] },
+          background: {
+            type: "boolean",
+            description:
+              "Silent background poll (reuses cached project list and skips prefs write)",
+          },
         },
       },
       _meta: { ui: { visibility: ["app"] } },
