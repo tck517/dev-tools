@@ -42,7 +42,7 @@ function readPrefs() {
   } catch {
     // ignore corrupt prefs
   }
-  return { project: null, collapsed: ["done"], view: "board" };
+  return { project: null, collapsed: ["deferred", "done"], view: "board" };
 }
 
 function writePrefs(patch) {
@@ -102,12 +102,14 @@ function buildBoardResponse(args = {}) {
     prefs: {
       view,
       filter,
-      collapsed: Array.isArray(prefs.collapsed) ? prefs.collapsed : ["done"],
+      collapsed: Array.isArray(prefs.collapsed)
+        ? prefs.collapsed
+        : ["deferred", "done"],
     },
   };
 
   const summary = snapshot.ok
-    ? `Beads Board (${snapshot.projectName}): ${snapshot.counts.wip} in process, ${snapshot.counts.next} up next, ${snapshot.counts.dlv} delivered, ${snapshot.counts.blocked} blocked, ${snapshot.counts.done} done (${snapshot.techTree.epics.length} active epics).`
+    ? `Beads Board (${snapshot.projectName}): ${snapshot.counts.wip} in process, ${snapshot.counts.next} up next, ${snapshot.counts.dlv} delivered, ${snapshot.counts.blocked} blocked, ${snapshot.counts.deferred} deferred, ${snapshot.counts.done} done (${snapshot.techTree.epics.length} active epics).`
     : `Beads Board error: ${snapshot.error}`;
 
   return {

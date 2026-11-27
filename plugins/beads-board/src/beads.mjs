@@ -277,15 +277,24 @@ function buildEpicTree(items) {
 
   const epicRawState = new Map();
   for (const eid of activeIds) {
+    const eb = epics.get(eid);
     const kids = childrenByEpic.get(eid);
     const closedCount = kids.filter((k) => k.status === "closed").length;
-    const deliveredCount = kids.filter((k) => k.status !== "closed" && k.delivered).length;
+    const deferredCount = kids.filter((k) => k.status === "deferred").length;
+    const activeTotal = kids.length - deferredCount;
+    const deliveredCount = kids.filter(
+      (k) => k.status !== "closed" && k.status !== "deferred" && k.delivered,
+    ).length;
     const wipCount = kids.filter(
       (k) => k.status === "in_progress" && !k.delivered,
     ).length;
-    if (closedCount === kids.length) epicRawState.set(eid, "done");
-    else if (wipCount > 0 || deliveredCount > 0) epicRawState.set(eid, "in-progress");
-    else epicRawState.set(eid, "pending");
+    if (eb?.status === "closed" || (activeTotal > 0 && closedCount === activeTotal)) {
+      epicRawState.set(eid, "done");
+    } else if (wipCount > 0 || deliveredCount > 0) {
+      epicRawState.set(eid, "in-progress");
+    } else {
+      epicRawState.set(eid, "pending");
+    }
   }
 
   const epicNodes = activeIds
@@ -293,7 +302,11 @@ function buildEpicTree(items) {
       const eb = epics.get(eid);
       const kids = childrenByEpic.get(eid);
       const closedCount = kids.filter((k) => k.status === "closed").length;
-      const deliveredCount = kids.filter((k) => k.status !== "closed" && k.delivered).length;
+      const deferredCount = kids.filter((k) => k.status === "deferred").length;
+      const activeTotal = kids.length - deferredCount;
+      const deliveredCount = kids.filter(
+        (k) => k.status !== "closed" && k.status !== "deferred" && k.delivered,
+      ).length;
       const wipCount = kids.filter(
         (k) => k.status === "in_progress" && !k.delivered,
       ).length;
@@ -311,7 +324,8 @@ function buildEpicTree(items) {
         closedCount,
         deliveredCount,
         wipCount,
-        totalCount: kids.length,
+        deferredCount,
+        totalCount: activeTotal,
         blockedBy: blockers,
         blocks: out.get(eid),
       };
@@ -321,28 +335,19 @@ function buildEpicTree(items) {
   return { epics: epicNodes, edges, criticalPath, looseOpen };
 }
 
-export function loadBoardSnapshot(projectPath) {
+const DEFAULT_DONE_LIMIT = 1500;
+const DEFAULT_MAX_DONE_BYTES = 550_000;
+
+export function buildSnapshotFromRaw(
+  rawList,
+  {
+    projectPath,
+    repoUrl = null,
+    doneLimit = DEFAULT_DONE_LIMIT,
+    maxDoneBytes = DEFAULT_MAX_DONE_BYTES,
+  },
+) {
   const abs = resolve(projectPath);
-  if (!existsSync(join(abs, ".beads"))) {
-    return {
-      ok: false,
-      error: `No .beads directory found at ${abs}`,
-      project: abs,
-    };
-  }
-
-  const rawList = bdJson(["list", "--status", "all", "--limit", "0"], abs);
-  if (!Array.isArray(rawList)) {
-    return {
-      ok: false,
-      error: `Failed to run 'bd list --status all --limit 0 --json' in ${abs}`,
-      project: abs,
-    };
-  }
-
-  const repoUrl = repoUrlFromOrigin(
-    execText("git", ["remote", "get-url", "origin"], abs),
-  );
 
   // Build normalized items matching bdboard semantics
   const normalized = rawList.map((r) => {
@@ -408,14 +413,25 @@ export function loadBoardSnapshot(projectPath) {
     .sort(byPriorityThenId);
 
   const next = openNonEpic.filter((b) => b.waits.length === 0).map(slim);
-  const blocked = openNonEpic.filter((b) => b.waits.length > 0).map(slim);
+  const blocked = [
+    ...openNonEpic.filter((b) => b.waits.length > 0),
+    ...withWaits.filter((b) => b.status === "blocked" && b.issueType !== "epic"),
+  ]
+    .sort(byPriorityThenId)
+    .map(slim);
 
   const dlv = withWaits
     .filter((b) => b.status === "in_progress" && b.delivered)
     .sort(byPriorityThenId)
     .map(slim);
 
-  // Cap DONE list to most recent 120 so payload stays snappy & well under 1 MiB
+  const deferred = withWaits
+    .filter((b) => b.status === "deferred" && b.issueType !== "epic")
+    .sort(byPriorityThenId)
+    .map(slim);
+
+  // Include closed beads up to doneLimit / maxDoneBytes so epic filtering finds
+  // historical closed beads while staying well under the 1 MiB MCP App cap.
   const allDone = withWaits
     .filter((b) => b.status === "closed")
     .sort((a, b) => {
@@ -425,7 +441,16 @@ export function loadBoardSnapshot(projectPath) {
       return a.id < b.id ? -1 : 1;
     });
   const doneTotal = allDone.length;
-  const done = allDone.slice(0, 120).map(slim);
+  const done = [];
+  let doneBytes = 2;
+  for (const item of allDone) {
+    if (done.length >= doneLimit) break;
+    const s = slim(item);
+    const bytes = Buffer.byteLength(JSON.stringify(s), "utf8") + 1;
+    if (done.length > 0 && doneBytes + bytes > maxDoneBytes) break;
+    done.push(s);
+    doneBytes += bytes;
+  }
 
   const techTree = buildEpicTree(normalized);
 
@@ -442,12 +467,39 @@ export function loadBoardSnapshot(projectPath) {
       next: next.length,
       dlv: dlv.length,
       blocked: blocked.length,
+      deferred: deferred.length,
       done: doneTotal,
       total: normalized.length,
     },
-    sections: { wip, next, dlv, blocked, done },
+    sections: { wip, next, dlv, blocked, deferred, done },
     techTree,
   };
+}
+
+export function loadBoardSnapshot(projectPath) {
+  const abs = resolve(projectPath);
+  if (!existsSync(join(abs, ".beads"))) {
+    return {
+      ok: false,
+      error: `No .beads directory found at ${abs}`,
+      project: abs,
+    };
+  }
+
+  const rawList = bdJson(["list", "--status", "all", "--limit", "0"], abs);
+  if (!Array.isArray(rawList)) {
+    return {
+      ok: false,
+      error: `Failed to run 'bd list --status all --limit 0 --json' in ${abs}`,
+      project: abs,
+    };
+  }
+
+  const repoUrl = repoUrlFromOrigin(
+    execText("git", ["remote", "get-url", "origin"], abs),
+  );
+
+  return buildSnapshotFromRaw(rawList, { projectPath: abs, repoUrl });
 }
 
 /** Extract repo-relative file paths from bead text that exist on disk. */

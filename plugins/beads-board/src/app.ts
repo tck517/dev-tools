@@ -56,6 +56,7 @@ type BoardPayload = {
     next: number;
     dlv: number;
     blocked: number;
+    deferred?: number;
     done: number;
     total: number;
   };
@@ -64,6 +65,7 @@ type BoardPayload = {
     next: BeadSummary[];
     dlv: BeadSummary[];
     blocked: BeadSummary[];
+    deferred?: BeadSummary[];
     done: BeadSummary[];
   };
   techTree?: {
@@ -117,15 +119,18 @@ const SECTIONS = [
   { key: "next", label: "UP NEXT", tone: "info" },
   { key: "dlv", label: "DELIVERED", tone: "accent" },
   { key: "blocked", label: "BLOCKED", tone: "danger" },
+  { key: "deferred", label: "DEFERRED", tone: "muted" },
   { key: "done", label: "DONE", tone: "success" },
 ] as const;
+
+const UNFILTERED_DONE_RENDER_LIMIT = 120;
 
 const app = new App({ name: "Beads Board", version: "1.0.0" }, {});
 
 let board: BoardPayload | null = null;
 let view: "board" | "techtree" = "board";
 let filterText = "";
-let collapsed = new Set<string>(["done"]);
+let collapsed = new Set<string>(["deferred", "done"]);
 let selectedId: string | null = null;
 let selectedDetail: BeadDetail | null = null;
 let detailLoading = false;
@@ -500,12 +505,22 @@ function renderBoardView(): string {
   if (!board?.sections) return "";
   const q = filterText.trim();
   return SECTIONS.map((sec) => {
-    const allItems = board!.sections![sec.key];
+    const allItems = board!.sections![sec.key] || [];
     const items = q ? allItems.filter((b) => matchesFilter(b, q)) : allItems;
     const isCollapsed = !q && collapsed.has(sec.key);
     const totalCount =
       sec.key === "done" && board!.counts ? board!.counts.done : allItems.length;
     const countLabel = q ? `${items.length}/${totalCount}` : `${totalCount}`;
+    const visibleItems =
+      sec.key === "done" && !q && items.length > UNFILTERED_DONE_RENDER_LIMIT
+        ? items.slice(0, UNFILTERED_DONE_RENDER_LIMIT)
+        : items;
+    const truncatedNotice =
+      sec.key === "done" && !q && totalCount > visibleItems.length
+        ? `<div class="empty-row">Showing latest ${visibleItems.length} of ${totalCount} closed beads · type to filter all ${allItems.length}</div>`
+        : sec.key === "done" && q && items.length === 0 && allItems.length < totalCount
+          ? `<div class="empty-row">No matching beads in latest ${allItems.length} of ${totalCount} closed</div>`
+          : "";
     return `
       <section class="board-section">
         <button class="section-header tone-${sec.tone}" data-toggle-section="${sec.key}">
@@ -517,8 +532,8 @@ function renderBoardView(): string {
           isCollapsed
             ? ""
             : items.length === 0
-              ? `<div class="empty-row">${q ? "No matching beads" : "Empty"}</div>`
-              : `<div class="section-list">${items.map(renderBeadRow).join("")}</div>`
+              ? truncatedNotice || `<div class="empty-row">${q ? "No matching beads" : "Empty"}</div>`
+              : `<div class="section-list">${visibleItems.map(renderBeadRow).join("")}${truncatedNotice}</div>`
         }
       </section>
     `;
@@ -575,9 +590,10 @@ function renderEpicCard(ep: TechTreeNodeView): string {
       <div class="epic-title">${esc(ep.title)}</div>
       <div class="progress-track"><div class="progress-fill" style="width:${pct}%"></div></div>
       <div class="epic-stats">
-        <span>${ep.closedCount}/${ep.totalCount} closed (${pct}%)</span>
+        <span>${ep.totalCount ? `${ep.closedCount}/${ep.totalCount} closed (${pct}%)` : "0 active"}</span>
         ${ep.deliveredCount ? `<span>${ep.deliveredCount} delivered</span>` : ""}
         ${ep.wipCount ? `<span>${ep.wipCount} wip</span>` : ""}
+        ${ep.deferredCount ? `<span>${ep.deferredCount} deferred</span>` : ""}
       </div>
       ${depsHtml ? `<div class="epic-deps-wrap">${depsHtml}</div>` : ""}
     </div>

@@ -127,6 +127,7 @@ html, body, #root {
 .section-header.tone-info .section-label { color: var(--color-text-info, #38bdf8); }
 .section-header.tone-accent .section-label { color: #a78bfa; }
 .section-header.tone-danger .section-label { color: var(--color-text-danger, #f87171); }
+.section-header.tone-muted .section-label { color: var(--color-text-secondary, #9aa1b2); }
 .section-header.tone-success .section-label { color: var(--color-text-success, #34d399); }
 .section-count {
   margin-left: auto;

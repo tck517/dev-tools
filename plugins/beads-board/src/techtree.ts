@@ -11,6 +11,7 @@ export type EpicNode = {
   closedCount: number;
   deliveredCount: number;
   wipCount: number;
+  deferredCount?: number;
   totalCount: number;
   blockedBy: string[];
   blocks: string[];
