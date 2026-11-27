@@ -1,0 +1,25 @@
+{
+  "safety-guard": {
+    "PreToolUse": [
+      {
+        "matcher": "run_command|read_file|edit_file|write_file",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "./hooks/safety-guard.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  },
+  "beads-session-start": {
+    "SessionStart": [
+      {
+        "type": "command",
+        "command": "./hooks/session-start-agy.sh",
+        "timeout": 15
+      }
+    ]
+  }
+}

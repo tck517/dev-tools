@@ -1,0 +1,11 @@
+{
+  "name": "dev-tools-flow",
+  "displayName": "dev-tools Epic Workflow (Beads)",
+  "version": "1.0.0",
+  "description": "Beads-based epic delivery workflow for tck517/dev-tools: bead-worker, bead-reviewer, review-adjudicator, and epic-reviewer subagents; /explain-bead, /deliver, and /validate-epic skills; safety & privacy PreToolUse guard and bd prime SessionStart hook.",
+  "suggestedPrompts": [
+    "Explain the next ready bead with /explain-bead",
+    "Deliver a bead with /deliver",
+    "Validate an epic branch with /validate-epic"
+  ]
+}

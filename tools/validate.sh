@@ -101,7 +101,7 @@ fi
 if [ "$area" != dotfiles ]; then
   echo "scripts/ and tools"
   # shellcheck disable=SC2046 # one file per line, no spaces in names
-  set -- $(shell_scripts $(files scripts tools) install.sh)
+  set -- $(shell_scripts $(files scripts tools .agents/plugins/dev-tools-flow/hooks) install.sh)
   check "bash syntax" bash_syntax "$@"
   check "shellcheck" shellcheck -S warning "$@"
 fi
