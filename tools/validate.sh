@@ -2,7 +2,7 @@
 # Check that everything in the repo still loads. Run before pushing (the
 # pre-push hook does) and as the local gate for /deliver.
 #
-# Usage: tools/validate.sh [all|dotfiles|scripts]   (default: all)
+# Usage: tools/validate.sh [all|dotfiles|scripts|plugins]   (default: all)
 #
 # Nothing here touches your live setup: tmux loads the config into a
 # throwaway server, Neovim runs headless, install.sh runs against a temp HOME.
@@ -12,9 +12,9 @@ repo="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$repo"
 area="${1:-all}"
 case "$area" in
-  all|dotfiles|scripts) ;;
+  all|dotfiles|scripts|plugins) ;;
   -h|--help) sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-  *) echo "unknown area: $area (all, dotfiles or scripts)" >&2; exit 2 ;;
+  *) echo "unknown area: $area (all, dotfiles, scripts or plugins)" >&2; exit 2 ;;
 esac
 
 failed=0
@@ -84,7 +84,7 @@ bash_syntax() {
   return $rc
 }
 
-if [ "$area" != scripts ]; then
+if [ "$area" = all ] || [ "$area" = dotfiles ]; then
   echo "dotfiles/"
   check "fish syntax" fish_syntax
   check "tmux.conf loads" tmux_loads
@@ -98,12 +98,27 @@ if [ "$area" != scripts ]; then
   skip "kitty.conf" "kitty has no parse-only check"
 fi
 
-if [ "$area" != dotfiles ]; then
+if [ "$area" = all ] || [ "$area" = scripts ]; then
   echo "scripts/ and tools"
   # shellcheck disable=SC2046 # one file per line, no spaces in names
   set -- $(shell_scripts $(files scripts tools .agents/plugins/dev-tools-flow/hooks) install.sh)
   check "bash syntax" bash_syntax "$@"
   check "shellcheck" shellcheck -S warning "$@"
+fi
+
+if [ "$area" = all ] || [ "$area" = plugins ]; then
+  echo "plugins/"
+  # shellcheck disable=SC2046 # one file per line, no spaces in names
+  set -- $(shell_scripts $(files plugins))
+  if [ $# -gt 0 ]; then
+    check "plugin bash syntax" bash_syntax "$@"
+    check "plugin shellcheck" shellcheck -S warning "$@"
+  fi
+  if command -v node >/dev/null 2>&1 && [ -d plugins/beads-board/test ]; then
+    check "beads-board tests" node --test plugins/beads-board/test/*.test.ts
+  else
+    skip "beads-board tests" "node not installed"
+  fi
 fi
 
 if [ "$failed" = 0 ]; then

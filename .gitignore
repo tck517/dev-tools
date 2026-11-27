@@ -17,3 +17,8 @@ dotfiles/fish/secrets.fish
 # beads exports: issue data stays in the private Dolt remote, never in this
 # public repo
 .beads/*.jsonl
+
+# Plugin dependencies, build outputs, and local runtime state
+plugins/*/node_modules/
+plugins/*/dist/
+plugins/*/.data/

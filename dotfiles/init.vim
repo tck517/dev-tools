@@ -2,13 +2,13 @@
 " NEOVIM CONFIGURATION
 " ==============================================================================
 
-set nocompatible
+scriptencoding utf-8
 
 " ==============================================================================
 " PLUGIN DECLARATIONS
 " ==============================================================================
 
-call plug#begin("~/.config/nvim/bundle")
+call plug#begin('~/.config/nvim/bundle')
 
 " Git Integration
 Plug 'tpope/vim-fugitive'
@@ -67,7 +67,7 @@ syntax on
 set noswapfile
 
 " Leader key
-let mapleader = "_"
+let mapleader = '_'
 
 " Disable netrw (using nvim-tree instead)
 let g:loaded_netrw = 1
@@ -100,9 +100,9 @@ set background=dark
 " ==============================================================================
 
 " Test Runner
-let test#strategy = "neovim"
-let g:test#python#runner = "pytest"
-let test#project_root = "/Users/teddykim/projects/vibeacademy/agentic-patterns/tests"
+let test#strategy = 'neovim'
+let g:test#python#runner = 'pytest'
+let test#project_root = '/Users/teddykim/projects/vibeacademy/agentic-patterns/tests'
 
 " Limelight
 let g:limelight_conceal_ctermfg = '#282828'
@@ -521,8 +521,11 @@ highlight RedundantSpaces ctermbg=red guibg=red
 match RedundantSpaces /\s\+$/
 
 " Goyo integration
-autocmd! User GoyoEnter nested call <SID>goyo_enter()
-autocmd! User GoyoLeave nested call <SID>goyo_leave()
+augroup goyo_integration
+  autocmd!
+  autocmd User GoyoEnter nested call <SID>goyo_enter()
+  autocmd User GoyoLeave nested call <SID>goyo_leave()
+augroup END
 
 " ==============================================================================
 " FUNCTIONS

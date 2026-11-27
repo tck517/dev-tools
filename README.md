@@ -1,12 +1,15 @@
 # dev-tools
 
-My development setup, in two parts:
+My development setup, in three parts:
 
 - **[`dotfiles/`](dotfiles/)**: config for fish, tmux, Neovim and kitty, plus
   exported Alfred and iTerm settings.
 - **[`scripts/`](scripts/)**: small command-line tools, mostly shell. See
   [`scripts/README.md`](scripts/README.md). Each script stands on its own, so
   you can copy just the one you want.
+- **[`plugins/`](plugins/)**: Antigravity plugins (such as
+  [`beads-board`](plugins/beads-board/)), linked into
+  `~/.gemini/config/plugins/` by `install.sh`.
 
 This repo used to be two: `tck517/dotfiles` (renamed to this one) and
 `tck517/scripts` (merged into `scripts/` with its history).
@@ -14,8 +17,8 @@ This repo used to be two: `tck517/dotfiles` (renamed to this one) and
 ## Install
 
 ```sh
-git clone git@github.com:tck517/dev-tools.git ~/Projects/dev-tools
-cd ~/Projects/dev-tools
+git clone git@github.com:tck517/dev-tools.git ~/Projects/tck517/dev-tools
+cd ~/Projects/tck517/dev-tools
 ./install.sh --dry-run   # see what it would link
 ./install.sh
 ```
