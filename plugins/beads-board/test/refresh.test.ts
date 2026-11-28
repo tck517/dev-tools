@@ -4,6 +4,7 @@ import {
   boardFingerprint,
   createAutoRefresher,
   findBeadSummary,
+  shouldApplyBoardUpdate,
   type FingerprintableBoard,
 } from "../src/refresh.ts";
 
@@ -142,4 +143,30 @@ test("createAutoRefresher skips hidden/blocked ticks, prevents overlap, and resp
 
   refresher.stop();
   assert.equal(cleared, true);
+});
+
+test("shouldApplyBoardUpdate preserves healthy board on transient errors", () => {
+  const healthy = { ok: true, project: "/repo/a" };
+  const errSame = { ok: false, project: "/repo/a" };
+  const errOther = { ok: false, project: "/repo/b" };
+
+  // Background poll error does not wipe healthy board
+  assert.equal(
+    shouldApplyBoardUpdate(healthy, errSame, { isBackground: true }),
+    false,
+  );
+  // Same-project manual refresh error does not wipe healthy board
+  assert.equal(
+    shouldApplyBoardUpdate(healthy, errSame, { isProjectSwitch: false }),
+    false,
+  );
+  // Switching to a broken project shows the error
+  assert.equal(
+    shouldApplyBoardUpdate(healthy, errOther, { isProjectSwitch: true }),
+    true,
+  );
+  // Initial load error shows the error
+  assert.equal(shouldApplyBoardUpdate(null, errSame), true);
+  // Recovery from error state applies healthy snapshot
+  assert.equal(shouldApplyBoardUpdate(errSame, healthy, { isBackground: true }), true);
 });

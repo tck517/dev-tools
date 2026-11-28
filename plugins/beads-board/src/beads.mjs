@@ -14,12 +14,28 @@ const EXEC_ENV = {
   PATH: `/opt/homebrew/bin:/usr/local/bin:${process.env.PATH || "/usr/bin:/bin"}`,
 };
 const BD_TIMEOUT_MS = 12_000;
+const BD_RETRY_DELAY_MS = 250;
 const DELIVERED_LABELS = new Set(
   (process.env.BDBOARD_DELIVERED_LABELS || "committed,in-review")
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean),
 );
+
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function summarizeStderr(err) {
+  const raw = typeof err?.stderr === "string" ? err.stderr : "";
+  const lines = raw
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => l && !l.startsWith("warning:") && !l.startsWith("NOTE:"));
+  if (lines.length > 0) return lines[lines.length - 1].slice(0, 180);
+  if (err?.killed || err?.code === "ETIMEDOUT") return "timed out (bd busy)";
+  return typeof err?.message === "string" ? err.message.split("\n")[0].slice(0, 180) : "";
+}
 
 function execText(cmd, args, cwd) {
   try {
@@ -36,14 +52,44 @@ function execText(cmd, args, cwd) {
   }
 }
 
-function bdJson(args, cwd) {
-  const out = execText("bd", [...args, "--json"], cwd);
-  if (!out) return null;
+export function parseBdJsonOutput(raw) {
+  if (typeof raw !== "string" || !raw.trim()) return null;
+  // Bead descriptions/notes can contain stray control characters that reject JSON.parse.
+  const cleaned = raw.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, " ");
   try {
-    return JSON.parse(out);
+    return JSON.parse(cleaned);
   } catch {
     return null;
   }
+}
+
+function bdJsonWithError(args, cwd) {
+  let lastReason = "";
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const out = execFileSync("bd", [...args, "--json"], {
+        cwd,
+        env: EXEC_ENV,
+        encoding: "utf8",
+        timeout: BD_TIMEOUT_MS,
+        maxBuffer: 32 * 1024 * 1024,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      const parsed = parseBdJsonOutput(out);
+      if (parsed !== null) return { data: parsed, error: null };
+      lastReason = "invalid JSON output";
+    } catch (err) {
+      lastReason = summarizeStderr(err);
+      // Do not retry if bd itself is missing
+      if (err?.code === "ENOENT") break;
+    }
+    if (attempt === 0) sleepSync(BD_RETRY_DELAY_MS);
+  }
+  return { data: null, error: lastReason };
+}
+
+function bdJson(args, cwd) {
+  return bdJsonWithError(args, cwd).data;
 }
 
 export function repoUrlFromOrigin(remote) {
@@ -486,11 +532,15 @@ export function loadBoardSnapshot(projectPath) {
     };
   }
 
-  const rawList = bdJson(["list", "--status", "all", "--limit", "0"], abs);
+  const { data: rawList, error: bdErr } = bdJsonWithError(
+    ["list", "--status", "all", "--limit", "0"],
+    abs,
+  );
   if (!Array.isArray(rawList)) {
+    const detail = bdErr ? ` (${bdErr})` : "";
     return {
       ok: false,
-      error: `Failed to run 'bd list --status all --limit 0 --json' in ${abs}`,
+      error: `Failed to run 'bd list --status all --limit 0 --json' in ${abs}${detail}`,
       project: abs,
     };
   }

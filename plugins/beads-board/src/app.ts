@@ -9,6 +9,7 @@ import {
   boardFingerprint,
   createAutoRefresher,
   findBeadSummary,
+  shouldApplyBoardUpdate,
 } from "./refresh";
 import {
   buildTechTreeLayout,
@@ -263,7 +264,10 @@ async function pollBoardSilently() {
     });
     if (board?.project !== project) return;
     const sc = res.structuredContent as BoardPayload | undefined;
-    if (sc) {
+    if (
+      sc &&
+      shouldApplyBoardUpdate(board, sc, { isBackground: true })
+    ) {
       applyPayload(sc, { preserveUiState: true });
     }
   } catch {
@@ -316,15 +320,26 @@ async function refreshBoard(projectOverride?: string) {
     });
     const sc = res.structuredContent as BoardPayload | undefined;
     if (sc) {
-      if (projectOverride && projectOverride !== board?.project) {
-        selectedId = null;
-        selectedDetail = null;
-        pinnedEpicId = null;
-        filterCollapsed.clear();
+      const isProjectSwitch = Boolean(
+        projectOverride && projectOverride !== board?.project,
+      );
+      if (shouldApplyBoardUpdate(board, sc, { isProjectSwitch })) {
+        if (isProjectSwitch) {
+          selectedId = null;
+          selectedDetail = null;
+          pinnedEpicId = null;
+          filterCollapsed.clear();
+        }
+        applyPayload(sc);
+        autoRefresher.markRefreshed();
+        if (sc.ok) {
+          showToast(`Refreshed ${sc.projectName || "board"}`);
+        } else {
+          showToast(sc.error || "Refresh failed");
+        }
+      } else {
+        showToast(sc.error || "Refresh temporarily unavailable (bd busy)");
       }
-      applyPayload(sc);
-      autoRefresher.markRefreshed();
-      showToast(`Refreshed ${sc.projectName || "board"}`);
     }
   } catch (err) {
     showToast(`Refresh failed: ${String(err)}`);
