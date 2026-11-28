@@ -131,6 +131,7 @@ let board: BoardPayload | null = null;
 let view: "board" | "techtree" = "board";
 let filterText = "";
 let collapsed = new Set<string>(["deferred", "done"]);
+let filterCollapsed = new Set<string>();
 let selectedId: string | null = null;
 let selectedDetail: BeadDetail | null = null;
 let detailLoading = false;
@@ -319,6 +320,7 @@ async function refreshBoard(projectOverride?: string) {
         selectedId = null;
         selectedDetail = null;
         pinnedEpicId = null;
+        filterCollapsed.clear();
       }
       applyPayload(sc);
       autoRefresher.markRefreshed();
@@ -507,7 +509,7 @@ function renderBoardView(): string {
   return SECTIONS.map((sec) => {
     const allItems = board!.sections![sec.key] || [];
     const items = q ? allItems.filter((b) => matchesFilter(b, q)) : allItems;
-    const isCollapsed = !q && collapsed.has(sec.key);
+    const isCollapsed = q ? filterCollapsed.has(sec.key) : collapsed.has(sec.key);
     const totalCount =
       sec.key === "done" && board!.counts ? board!.counts.done : allItems.length;
     const countLabel = q ? `${items.length}/${totalCount}` : `${totalCount}`;
@@ -1150,6 +1152,7 @@ function render() {
     filterEl.addEventListener("input", () => {
       const pos = filterEl.selectionStart;
       filterText = filterEl.value;
+      if (!filterText.trim()) filterCollapsed.clear();
       render();
       const nextEl = document.getElementById("filter-input") as HTMLInputElement | null;
       if (nextEl) {
@@ -1161,6 +1164,7 @@ function render() {
 
   document.getElementById("clear-filter")?.addEventListener("click", () => {
     filterText = "";
+    filterCollapsed.clear();
     render();
   });
 
@@ -1182,9 +1186,14 @@ function render() {
   rootEl.querySelectorAll<HTMLElement>("[data-toggle-section]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const key = btn.dataset.toggleSection!;
-      if (collapsed.has(key)) collapsed.delete(key);
-      else collapsed.add(key);
-      void persistPrefs();
+      if (filterText.trim()) {
+        if (filterCollapsed.has(key)) filterCollapsed.delete(key);
+        else filterCollapsed.add(key);
+      } else {
+        if (collapsed.has(key)) collapsed.delete(key);
+        else collapsed.add(key);
+        void persistPrefs();
+      }
       render();
     });
   });
@@ -1207,6 +1216,7 @@ function render() {
   rootEl.querySelectorAll<HTMLElement>("[data-filter-epic]").forEach((card) => {
     card.addEventListener("click", () => {
       filterText = card.dataset.filterEpic!;
+      filterCollapsed.clear();
       view = "board";
       void persistPrefs();
       render();
