@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildSnapshotFromRaw } from "../src/beads.mjs";
+import { buildSnapshotFromRaw, parseBdJsonOutput } from "../src/beads.mjs";
 
 test("separates deferred children in Board and Tech Tree so completed+deferred epics finish cleanly", () => {
   const raw = [
@@ -118,4 +118,12 @@ test("respects maxDoneBytes budget for very large repositories", () => {
   assert.ok(snap.sections.done.length > 0 && snap.sections.done.length < 400);
   const doneBytes = Buffer.byteLength(JSON.stringify(snap.sections.done), "utf8");
   assert.ok(doneBytes <= 5_000);
+});
+
+test("parseBdJsonOutput sanitizes stray control characters in bead text", () => {
+  const raw = '[{"id":"va-1","title":"hello\u0007world"}]';
+  const parsed = parseBdJsonOutput(raw);
+  assert.deepEqual(parsed, [{ id: "va-1", title: "hello world" }]);
+  assert.equal(parseBdJsonOutput("not json"), null);
+  assert.equal(parseBdJsonOutput(""), null);
 });

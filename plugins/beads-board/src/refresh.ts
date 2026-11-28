@@ -33,6 +33,25 @@ export function boardFingerprint(
 }
 
 /**
+ * Decide whether an incoming board payload should replace the currently
+ * rendered board. Prevents transient `bd` / Dolt lock errors during background
+ * polling or same-project manual refreshes from wiping out a healthy board UI.
+ */
+export function shouldApplyBoardUpdate(
+  current: Pick<FingerprintableBoard, "ok" | "project"> | null | undefined,
+  incoming: Pick<FingerprintableBoard, "ok" | "project"> | null | undefined,
+  opts: { isBackground?: boolean; isProjectSwitch?: boolean } = {},
+): boolean {
+  if (!incoming) return false;
+  if (incoming.ok) return true;
+  // Incoming payload failed: only replace the board if we don't already have a
+  // healthy snapshot for the same project (e.g. initial load or project switch).
+  if (!current || !current.ok) return true;
+  if (opts.isProjectSwitch && incoming.project !== current.project) return true;
+  return false;
+}
+
+/**
  * Look up a bead's summary record across all board sections for change detection.
  */
 export function findBeadSummary<T extends { id: string }>(
